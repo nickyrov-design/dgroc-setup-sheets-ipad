@@ -1,0 +1,547 @@
+/* Setup Sheets PWA — touch-optimised for iPad. */
+
+:root {
+  --bg: #0b1220;
+  --bg-elev: #131c2e;
+  --bg-card: #1a253b;
+  --bg-input: #0f1729;
+  --text: #e6ebf2;
+  --text-dim: #9aa6b8;
+  --border: #2a3552;
+  --border-strong: #3b4870;
+  --accent: #4f8cff;
+  --accent-hover: #6ea0ff;
+  --danger: #d94f4f;
+  --ok: #4caf50;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 16px;
+  min-height: 100vh;
+  -webkit-text-size-adjust: 100%;
+  overscroll-behavior-y: none;
+}
+
+button, input, select, textarea {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+button { cursor: pointer; }
+
+/* ---- Header ---- */
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding-top: calc(12px + env(safe-area-inset-top));
+}
+
+.app-header__brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  text-decoration: none;
+  color: var(--text);
+}
+
+.app-header__logo {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+}
+
+.app-header__wordmark {
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+.app-header__nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-header__navlink {
+  padding: 10px 16px;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  color: var(--text-dim);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  min-width: 44px;
+  justify-content: center;
+}
+
+.app-header__navlink.is-active,
+.app-header__navlink:active {
+  background: var(--bg-card);
+  color: var(--text);
+}
+
+/* ---- Main / pages ---- */
+
+.app-main {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px 20px 80px;
+  padding-bottom: calc(80px + env(safe-area-inset-bottom));
+}
+
+.page-title {
+  font-size: 1.6rem;
+  margin: 0 0 4px;
+}
+
+.page-sub {
+  margin: 0 0 24px;
+  color: var(--text-dim);
+}
+
+.page-error {
+  padding: 40px;
+  text-align: center;
+  color: var(--danger);
+}
+
+/* ---- Cards (landing) ---- */
+
+.tool-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.tool-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 24px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  text-align: left;
+  text-decoration: none;
+  min-height: 140px;
+  transition: background 0.15s, border-color 0.15s, transform 0.05s;
+}
+
+.tool-card:active {
+  background: var(--bg-elev);
+  border-color: var(--border-strong);
+  transform: scale(0.98);
+}
+
+.tool-card__icon {
+  color: var(--accent);
+}
+
+.tool-card__label {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.tool-card__desc {
+  font-size: 0.9rem;
+  color: var(--text-dim);
+}
+
+/* ---- Buttons ---- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 20px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text);
+  min-height: 44px;
+  font-size: 1rem;
+  text-decoration: none;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.btn:active { background: var(--bg-elev); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+.btn--primary:active { background: var(--accent-hover); }
+
+.btn--ghost {
+  background: transparent;
+  border-color: var(--border-strong);
+  color: var(--text-dim);
+}
+
+.btn--danger {
+  background: transparent;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* ---- Form ---- */
+
+.setup-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.setup-sheet__topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-size: 0.95rem;
+}
+
+.setup-sheet__topbar-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.setup-sheet__topbar--locked { border-color: var(--ok); }
+.setup-sheet__topbar--editing { border-color: var(--accent); }
+
+.setup-sheet__section {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+}
+
+.setup-sheet__section-title {
+  margin: 0 0 14px;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+}
+
+.setup-sheet__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px 16px;
+}
+
+.setup-sheet__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.setup-sheet__field--full { grid-column: 1 / -1; }
+
+.setup-sheet__field--check {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+.setup-sheet__field--check input[type="checkbox"] {
+  width: 24px;
+  height: 24px;
+  accent-color: var(--accent);
+}
+
+.setup-sheet__label {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
+.setup-sheet__input, .setup-sheet__textarea {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  min-height: 44px;
+}
+
+.setup-sheet__textarea { resize: vertical; min-height: 96px; }
+
+.setup-sheet__input:focus, .setup-sheet__textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.setup-sheet[data-readonly] .setup-sheet__input,
+.setup-sheet[data-readonly] .setup-sheet__textarea {
+  opacity: 0.85;
+  cursor: not-allowed;
+}
+
+.setup-sheet__footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 8px;
+}
+
+.setup-sheet__complete {
+  min-width: 220px;
+  padding: 16px 28px;
+  font-size: 1.05rem;
+}
+
+.setup-sheet__error {
+  color: var(--danger);
+  font-size: 0.95rem;
+  min-height: 1.2em;
+}
+
+/* ---- History list ---- */
+
+.history-toolbar {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.history-toolbar__chip {
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-dim);
+  min-height: 40px;
+}
+
+.history-toolbar__chip.is-active {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.history-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.history-row:active { background: var(--bg-elev); }
+
+.history-row__primary { font-weight: 600; }
+.history-row__sub { color: var(--text-dim); font-size: 0.9rem; }
+.history-row__meta { color: var(--text-dim); font-size: 0.85rem; text-align: right; }
+
+.history-empty {
+  padding: 40px;
+  text-align: center;
+  color: var(--text-dim);
+}
+
+/* ---- Settings / therapists panel ---- */
+
+.panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  margin-bottom: 18px;
+}
+
+.panel__title {
+  margin: 0 0 8px;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.panel__desc {
+  margin: 0 0 14px;
+  color: var(--text-dim);
+  font-size: 0.92rem;
+}
+
+.therapist-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.therapist-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.therapist-row__name {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.therapist-row__name input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  padding: 6px 0;
+  min-height: 32px;
+}
+
+.therapist-row__name input:focus { outline: none; }
+
+.therapist-row__default-badge {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.add-therapist {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.add-therapist input {
+  flex: 1;
+  padding: 10px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  min-height: 44px;
+}
+
+/* ---- Dialogs ---- */
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 20px;
+}
+
+.dialog {
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 24px;
+  width: 100%;
+  max-width: 440px;
+  box-shadow: var(--shadow);
+}
+
+.dialog__title {
+  margin: 0 0 8px;
+  font-size: 1.15rem;
+}
+
+.dialog__desc {
+  margin: 0 0 16px;
+  color: var(--text-dim);
+  font-size: 0.95rem;
+}
+
+.dialog__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.dialog__field label {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
+.dialog__field select,
+.dialog__field input {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  min-height: 44px;
+}
+
+.dialog__error {
+  color: var(--danger);
+  font-size: 0.9rem;
+  min-height: 1.2em;
+  margin-bottom: 8px;
+}
+
+.dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ---- iPad-specific tweaks ---- */
+
+@media (max-width: 600px) {
+  .app-header__wordmark { display: none; }
+  .setup-sheet__grid { grid-template-columns: 1fr; }
+  .history-row { grid-template-columns: 1fr; }
+  .history-row__meta { text-align: left; }
+}

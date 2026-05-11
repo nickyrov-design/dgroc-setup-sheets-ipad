@@ -1,0 +1,15 @@
+{
+  "name": "Setup Sheets",
+  "short_name": "Setup Sheets",
+  "description": "Patient set-up sheet form filler for Extremity, Head and Neck, and Omniboard.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0b1220",
+  "theme_color": "#0b1220",
+  "icons": [
+    { "src": "./assets/icons/logo_notext.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./assets/icons/logo.png",        "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

@@ -1,0 +1,15 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local Claude Code state
+.claude/
+
+# Node (not used yet, but defensive)
+node_modules/
+npm-debug.log*
+
+# Local dev server output
+*.log
