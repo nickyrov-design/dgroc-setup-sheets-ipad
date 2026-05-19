@@ -8,7 +8,7 @@
  */
 
 const DB_NAME = "dgroc-setup-sheets";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let _dbPromise = null;
 
@@ -18,6 +18,7 @@ function openDb() {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = (e) => {
       const db = e.target.result;
+      const txn = e.target.transaction;
       if (!db.objectStoreNames.contains("records")) {
         const store = db.createObjectStore("records", { keyPath: "id" });
         store.createIndex("sheetId", "sheetId", { unique: false });
@@ -27,6 +28,21 @@ function openDb() {
       }
       if (!db.objectStoreNames.contains("settings")) {
         db.createObjectStore("settings", { keyPath: "key" });
+      }
+      /* v1 -> v2: backfill archived:false on existing records. */
+      if (e.oldVersion < 2 && txn) {
+        const store = txn.objectStore("records");
+        const cursorReq = store.openCursor();
+        cursorReq.onsuccess = (ev) => {
+          const cursor = ev.target.result;
+          if (!cursor) return;
+          const rec = cursor.value;
+          if (typeof rec.archived !== "boolean") {
+            rec.archived = false;
+            cursor.update(rec);
+          }
+          cursor.continue();
+        };
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -71,6 +87,7 @@ async function saveRecord(sheetId, formData, pdfBlob) {
     id,
     sheetId,
     status: "completed",
+    archived: false,
     pdfBlob,
   };
   await reqAsPromise(store.add(record));
@@ -96,6 +113,8 @@ async function updateRecord(id, formData, pdfBlob, editor) {
     id,
     sheetId: prev.sheetId,
     status: "completed",
+    archived: typeof prev.archived === "boolean" ? prev.archived : false,
+    archivedAt: prev.archivedAt || null,
     completedBy: prev.completedBy || formData.completedBy || editor?.name || "",
     completedAt: prev.completedAt || formData.completedAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -106,11 +125,18 @@ async function updateRecord(id, formData, pdfBlob, editor) {
   return { ok: true, id };
 }
 
-async function listRecords(sheetId) {
+async function listRecords(sheetId, opts = {}) {
+  const { includeArchived = false, archivedOnly = false } = opts;
   const store = await tx("records");
   const all = await reqAsPromise(store.getAll());
   const out = all
     .filter((r) => !sheetId || r.sheetId === sheetId)
+    .filter((r) => {
+      const archived = !!r.archived;
+      if (archivedOnly) return archived;
+      if (includeArchived) return true;
+      return !archived;
+    })
     .map((r) => ({
       id: r.id,
       sheetId: r.sheetId,
@@ -123,11 +149,59 @@ async function listRecords(sheetId) {
       completedAt: r.completedAt || "",
       updatedAt: r.updatedAt || "",
       editCount: Array.isArray(r.editHistory) ? r.editHistory.length : 0,
+      archived: !!r.archived,
+      archivedAt: r.archivedAt || "",
     }));
   out.sort((a, b) =>
     (b.updatedAt || b.completedAt || "").localeCompare(a.updatedAt || a.completedAt || "")
   );
   return out;
+}
+
+async function countArchived(sheetId) {
+  const archived = await listRecords(sheetId, { archivedOnly: true });
+  return archived.length;
+}
+
+async function setArchived(id, archived) {
+  const store = await tx("records", "readwrite");
+  const cur = await reqAsPromise(store.get(id));
+  if (!cur) return { ok: false, error: "Record not found." };
+  const next = {
+    ...cur,
+    archived: !!archived,
+    archivedAt: archived ? new Date().toISOString() : null,
+  };
+  await reqAsPromise(store.put(next));
+  return { ok: true };
+}
+
+async function archiveOlderThan(isoCutoff) {
+  const store = await tx("records", "readwrite");
+  const all = await reqAsPromise(store.getAll());
+  let updated = 0;
+  for (const r of all) {
+    if (r.archived) continue;
+    const stamp = r.updatedAt || r.completedAt || "";
+    if (stamp && stamp < isoCutoff) {
+      const next = { ...r, archived: true, archivedAt: new Date().toISOString() };
+      await reqAsPromise(store.put(next));
+      updated++;
+    }
+  }
+  return { ok: true, archived: updated };
+}
+
+async function countOlderThan(isoCutoff) {
+  const store = await tx("records");
+  const all = await reqAsPromise(store.getAll());
+  let n = 0;
+  for (const r of all) {
+    if (r.archived) continue;
+    const stamp = r.updatedAt || r.completedAt || "";
+    if (stamp && stamp < isoCutoff) n++;
+  }
+  return n;
 }
 
 async function getRecord(id) {
@@ -193,7 +267,17 @@ async function setSetting(key, value) {
 }
 
 export default {
-  records: { save: saveRecord, update: updateRecord, list: listRecords, get: getRecord, remove: deleteRecord },
+  records: {
+    save: saveRecord,
+    update: updateRecord,
+    list: listRecords,
+    get: getRecord,
+    remove: deleteRecord,
+    setArchived,
+    countArchived,
+    archiveOlderThan,
+    countOlderThan,
+  },
   therapists: { list: listTherapists, add: addTherapist, rename: renameTherapist, remove: removeTherapist },
   settings: { get: getSetting, set: setSetting },
   generateId,

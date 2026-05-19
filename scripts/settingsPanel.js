@@ -22,11 +22,20 @@ const SettingsPanel = {
   },
 
   async _render() {
-    const [therapists, defaultId, records] = await Promise.all([
+    const sixMonthsAgoIso = (() => {
+      const d = new Date();
+      d.setMonth(d.getMonth() - 6);
+      return d.toISOString();
+    })();
+
+    const [therapists, defaultId, records, archivedCount, archivableCount] = await Promise.all([
       Storage.therapists.list(),
       Storage.settings.get("defaultTherapistId"),
-      Storage.records.list(),
+      Storage.records.list(undefined, { includeArchived: true }),
+      Storage.records.countArchived(),
+      Storage.records.countOlderThan(sixMonthsAgoIso),
     ]);
+    this._sixMonthsAgoIso = sixMonthsAgoIso;
 
     const therapistOpts = therapists.length
       ? `<select id="default-therapist-select" class="setup-sheet__input">
@@ -54,11 +63,19 @@ const SettingsPanel = {
 
       <section class="panel">
         <h2 class="panel__title">Storage</h2>
-        <p class="panel__desc">${records.length} completed sheet${records.length === 1 ? "" : "s"} stored on this iPad.</p>
-        <button type="button" class="btn btn--danger" id="wipe-data-btn">Wipe all app data&hellip;</button>
+        <p class="panel__desc">${records.length} completed sheet${records.length === 1 ? "" : "s"} stored on this iPad &middot; ${archivedCount} archived.</p>
+        <div class="panel__actions">
+          <button
+            type="button"
+            class="btn btn--ghost"
+            id="bulk-archive-btn"
+            ${archivableCount === 0 ? "disabled" : ""}
+          >Archive sheets older than 6 months${archivableCount > 0 ? ` (${archivableCount})` : ""}</button>
+          <button type="button" class="btn btn--danger" id="wipe-data-btn">Wipe all app data&hellip;</button>
+        </div>
       </section>
 
-      <p class="page-sub" style="margin-top:24px">Setup Sheets PWA &middot; v1</p>
+      <p class="page-sub" style="margin-top:24px">Setup Sheets PWA &middot; v2</p>
     `;
 
     this._bind();
@@ -69,6 +86,16 @@ const SettingsPanel = {
     if (select) {
       select.addEventListener("change", async () => {
         await Storage.settings.set("defaultTherapistId", select.value || null);
+      });
+    }
+
+    const bulkBtn = document.getElementById("bulk-archive-btn");
+    if (bulkBtn && !bulkBtn.disabled) {
+      bulkBtn.addEventListener("click", async () => {
+        const res = await Storage.records.archiveOlderThan(this._sixMonthsAgoIso);
+        if (!res.ok) { alert(res.error || "Could not archive."); return; }
+        alert(`Archived ${res.archived} sheet${res.archived === 1 ? "" : "s"} older than 6 months.`);
+        await this._render();
       });
     }
 
