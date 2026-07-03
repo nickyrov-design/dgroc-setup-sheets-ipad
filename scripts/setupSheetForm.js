@@ -212,6 +212,23 @@ const SetupSheetForm = {
     return false;
   },
 
+  /* Show the header Save button (next to History) while a fillable sheet is
+     open, wired to the same file-and-save action as the footer button. */
+  _syncHeaderSave() {
+    const btn = document.getElementById("header-save-btn");
+    if (!btn) return;
+    const fillable = (this._mode === "new" || this._mode === "edit")
+      && !!document.getElementById("setup-sheet-form");
+    if (fillable) {
+      btn.textContent = this._mode === "edit" ? "Save changes" : "Save";
+      btn.hidden = false;
+      btn.onclick = () => this._saveSheet(`/history/${this._config.id}`);
+    } else {
+      btn.hidden = true;
+      btn.onclick = null;
+    }
+  },
+
   /* Register (new/edit) or drop (view) the navigation guard for this screen. */
   _installGuard() {
     if (this._mode === "new" || this._mode === "edit") {
@@ -417,7 +434,7 @@ const SetupSheetForm = {
 
   _bind() {
     const form = document.getElementById("setup-sheet-form");
-    if (!form) { this._installGuard(); return; }
+    if (!form) { this._installGuard(); this._syncHeaderSave(); return; }
 
     form.addEventListener("change", () => this._saveDraft());
     form.addEventListener("input", () => this._saveDraft());
@@ -467,6 +484,7 @@ const SetupSheetForm = {
     }
 
     this._installGuard();
+    this._syncHeaderSave();
   },
 
   /* ---- Complete / Save ---- */

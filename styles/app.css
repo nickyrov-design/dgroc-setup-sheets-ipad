@@ -82,6 +82,17 @@ button { cursor: pointer; }
   gap: 8px;
 }
 
+/* Save button in the header, shown only while a sheet is being filled. The
+   [hidden] rule is more specific than .btn's display, so it actually hides. */
+.app-header__save {
+  padding: 8px 18px;
+  min-height: 40px;
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+}
+
+.app-header__save[hidden] { display: none; }
+
 .app-header__navlink {
   padding: 10px 16px;
   border-radius: var(--radius-sm);

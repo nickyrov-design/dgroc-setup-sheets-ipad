@@ -67,6 +67,10 @@ function dispatch() {
      its own on mount. Clearing here keeps a stale guard from firing on the
      next page. */
   clearGuard();
+  /* The header Save button belongs to the sheet form; hide it on every
+     navigation. The form re-shows it when a fillable sheet mounts. */
+  const headerSave = document.getElementById("header-save-btn");
+  if (headerSave) headerSave.hidden = true;
   const result = match(location.hash);
   const app = document.getElementById("app");
   if (!app) return;
