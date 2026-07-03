@@ -616,6 +616,71 @@ button { cursor: pointer; }
   gap: 8px;
 }
 
+/* Leave prompt: three full-width choices stacked vertically. */
+.dialog__actions--stacked {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+}
+.dialog__actions--stacked .btn { width: 100%; }
+
+/* ---- Resume unfinished draft (landing) ---- */
+
+.resume-banner {
+  background: var(--bg-card);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  margin-bottom: 20px;
+}
+
+.resume-banner__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.resume-banner__icon {
+  color: var(--accent);
+  flex: 0 0 auto;
+  display: inline-flex;
+  margin-top: 1px;
+}
+
+.resume-banner__title { font-weight: 600; }
+.resume-banner__sub { color: var(--text-dim); font-size: 0.9rem; margin-top: 2px; }
+
+.resume-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.resume-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.resume-item__info { display: flex; flex-direction: column; gap: 2px; }
+.resume-item__label { font-weight: 600; }
+.resume-item__when { color: var(--text-dim); font-size: 0.82rem; }
+
+.resume-item__actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 /* ---- iPad-specific tweaks ---- */
 
 @media (max-width: 600px) {

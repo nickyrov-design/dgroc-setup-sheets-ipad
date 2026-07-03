@@ -6,16 +6,21 @@
  *   "new"   — fresh form, draft auto-saved per sheetId in localStorage
  *   "view"  — completed sheet, fields disabled, export/edit actions shown
  *   "edit"  — re-editing an existing sheet; appended to its editHistory on save
+ *
+ * Unsaved-work protection:
+ *   - "new" drafts auto-save on every keystroke and whenever the app is
+ *     backgrounded (home button), and reload when the sheet is reopened.
+ *   - Leaving a form with unsaved entries (History / Settings / logo) prompts
+ *     the user to complete & file, keep the draft, or stay.
  */
 
 import Router from "./router.js";
 import SETUP_SHEET_CONFIGS from "./setupSheetConfigs/index.js";
 import Storage from "./storage.js";
 import { exportPdf } from "./share.js";
+import { readDraft, writeDraft, clearDraft, draftHasData } from "./draft.js";
 
 const NA = "N/A";
-
-function getDraftKey(sheetId) { return `setup-sheet-draft-${sheetId}`; }
 
 function escapeHtml(s) {
   return String(s ?? "")
@@ -119,18 +124,15 @@ const SetupSheetForm = {
     this._container = container;
     const config = SETUP_SHEET_CONFIGS[sheetId];
     if (!config) {
+      Router.clearGuard();
       container.innerHTML = `<div class="page-error">Unknown sheet type: ${escapeHtml(sheetId)}</div>`;
       return;
     }
     this._config = config;
     this._mode = "new";
     this._record = null;
-    let draft = null;
-    try {
-      const raw = localStorage.getItem(getDraftKey(sheetId));
-      if (raw) draft = JSON.parse(raw);
-    } catch { /* ignore */ }
-    this._render(draft || {});
+    const draft = readDraft(sheetId);
+    this._render(draft?.data || {});
     this._bind();
   },
 
@@ -138,11 +140,13 @@ const SetupSheetForm = {
     this._container = container;
     const config = SETUP_SHEET_CONFIGS[sheetId];
     if (!config) {
+      Router.clearGuard();
       container.innerHTML = `<div class="page-error">Unknown sheet type.</div>`;
       return;
     }
     const record = await Storage.records.get(recordId);
     if (!record) {
+      Router.clearGuard();
       container.innerHTML = `<div class="page-error">Sheet not found.</div>`;
       return;
     }
@@ -169,13 +173,103 @@ const SetupSheetForm = {
 
   _saveDraft() {
     if (this._mode !== "new") return;
-    try {
-      localStorage.setItem(getDraftKey(this._config.id), JSON.stringify(this._readDOM()));
-    } catch { /* ignore quota */ }
+    /* Only persist while the form is actually on screen — otherwise a
+       backgrounding event fired on another page would read an empty DOM and
+       clobber a good draft. */
+    if (!document.getElementById("setup-sheet-form")) return;
+    const data = this._readDOM();
+    if (Object.keys(data).length === 0) return;
+    writeDraft(this._config.id, data);
   },
 
   _clearDraft() {
-    try { localStorage.removeItem(getDraftKey(this._config.id)); } catch { /* ignore */ }
+    if (this._config) clearDraft(this._config.id);
+  },
+
+  /* ---- Unsaved-work detection ---- */
+
+  _isDirty() {
+    if (this._mode === "new") {
+      return draftHasData(this._readDOM(), this._config);
+    }
+    if (this._mode === "edit" && this._record) {
+      const cur = this._readDOM();
+      for (const f of this._config.fields) {
+        const now = cur[f.id];
+        const was = this._record[f.id];
+        if (f.type === "check") {
+          if (!!now !== !!was) return true;
+        } else if (f.type === "dropdown") {
+          const a = (now == null || now === "") ? NA : String(now);
+          const b = (was == null || was === "") ? NA : String(was);
+          if (a !== b) return true;
+        } else if (String(now ?? "") !== String(was ?? "")) {
+          return true;
+        }
+      }
+      return false;
+    }
+    return false;
+  },
+
+  /* Register (new/edit) or drop (view) the navigation guard for this screen. */
+  _installGuard() {
+    if (this._mode === "new" || this._mode === "edit") {
+      Router.setGuard((target) => this._confirmLeave(target));
+    } else {
+      Router.clearGuard();
+    }
+  },
+
+  /**
+   * Consulted by the router when the user taps away from an unsaved sheet.
+   * Resolves "proceed" (leave, draft kept), "stay", or "handled" (this method
+   * completed & filed the sheet and navigated on its own).
+   */
+  _confirmLeave(targetHash) {
+    if (!this._isDirty()) return Promise.resolve("proceed");
+
+    const isEdit = this._mode === "edit";
+    return new Promise((resolve) => {
+      const root = document.getElementById("dialog-root");
+      root.innerHTML = `
+        <div class="dialog-backdrop">
+          <div class="dialog" role="dialog" aria-modal="true">
+            <h3 class="dialog__title">Save this set-up sheet?</h3>
+            <p class="dialog__desc">
+              ${isEdit
+                ? "You have unsaved changes to this sheet. Save them before leaving?"
+                : "This set-up sheet hasn&rsquo;t been filed yet. You can complete and file it now, or keep it as a draft and come back to it later."}
+            </p>
+            <div class="dialog__actions dialog__actions--stacked">
+              <button type="button" class="btn btn--primary" id="leave-save">${isEdit ? "Save changes" : "Complete &amp; file"}</button>
+              <button type="button" class="btn btn--ghost" id="leave-keep">${isEdit ? "Leave &amp; discard changes" : "Keep draft &amp; leave"}</button>
+              <button type="button" class="btn btn--ghost" id="leave-cancel">Stay on this sheet</button>
+            </div>
+          </div>
+        </div>
+      `;
+      const cleanup = () => { root.innerHTML = ""; };
+
+      document.getElementById("leave-cancel").addEventListener("click", () => {
+        cleanup();
+        resolve("stay");
+      });
+
+      document.getElementById("leave-keep").addEventListener("click", () => {
+        cleanup();
+        /* "new": flush the latest keystrokes so the draft is complete.
+           "edit": the filed record is untouched; in-progress edits are dropped. */
+        if (this._mode === "new") this._saveDraft();
+        resolve("proceed");
+      });
+
+      document.getElementById("leave-save").addEventListener("click", async () => {
+        cleanup();
+        const ok = await this._saveSheet(targetHash);
+        resolve(ok ? "handled" : "stay");
+      });
+    });
   },
 
   /* ---- Rendering ---- */
@@ -323,7 +417,7 @@ const SetupSheetForm = {
 
   _bind() {
     const form = document.getElementById("setup-sheet-form");
-    if (!form) return;
+    if (!form) { this._installGuard(); return; }
 
     form.addEventListener("change", () => this._saveDraft());
     form.addEventListener("input", () => this._saveDraft());
@@ -338,7 +432,9 @@ const SetupSheetForm = {
     }
 
     const completeBtn = document.getElementById("ss-complete-btn");
-    if (completeBtn) completeBtn.addEventListener("click", () => this._onComplete());
+    if (completeBtn) {
+      completeBtn.addEventListener("click", () => this._saveSheet(`/history/${this._config.id}`));
+    }
 
     const editBtn = document.getElementById("ss-edit-btn");
     if (editBtn) {
@@ -352,6 +448,7 @@ const SetupSheetForm = {
     const cancelEditBtn = document.getElementById("ss-cancel-edit-btn");
     if (cancelEditBtn) {
       cancelEditBtn.addEventListener("click", () => {
+        if (this._isDirty() && !confirm("Discard your changes to this sheet?")) return;
         this._mode = "view";
         this._render(this._record);
         this._bind();
@@ -368,21 +465,31 @@ const SetupSheetForm = {
         if (!res.ok && !res.canceled) alert(res.error || "Could not export PDF.");
       });
     }
+
+    this._installGuard();
   },
 
   /* ---- Complete / Save ---- */
 
-  async _onComplete() {
+  /**
+   * Files the sheet (new: locked copy; edit: overwrite + log). On success the
+   * draft and guard are cleared and the app navigates to `destinationHash`.
+   * Returns true on success, false if cancelled or errored (caller stays put).
+   */
+  async _saveSheet(destinationHash) {
     const errorEl = document.getElementById("setup-sheet-error");
-    errorEl.textContent = "";
+    if (errorEl) errorEl.textContent = "";
 
     const signer = await pickTherapist({
       title: this._mode === "edit" ? "Save changes" : "Complete set-up sheet",
       confirmLabel: this._mode === "edit" ? "Save" : "Complete",
     });
-    if (!signer) return;
+    if (!signer) return false;
 
     const btn = document.getElementById("ss-complete-btn");
+    const resetBtn = () => {
+      if (btn) { btn.disabled = false; btn.textContent = this._mode === "edit" ? "Save changes" : "Complete Form"; }
+    };
     if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
 
     try {
@@ -408,17 +515,20 @@ const SetupSheetForm = {
       }
 
       if (!result.ok) {
-        errorEl.textContent = "Could not save sheet: " + (result.error || "unknown error");
-        if (btn) { btn.disabled = false; btn.textContent = this._mode === "edit" ? "Save changes" : "Complete Form"; }
-        return;
+        if (errorEl) errorEl.textContent = "Could not save sheet: " + (result.error || "unknown error");
+        resetBtn();
+        return false;
       }
 
       this._clearDraft();
-      Router.navigate(`/history/${this._config.id}`);
+      Router.clearGuard();
+      Router.navigate(destinationHash || `/history/${this._config.id}`);
+      return true;
     } catch (err) {
       console.error(err);
-      errorEl.textContent = "Error generating PDF: " + err.message;
-      if (btn) { btn.disabled = false; btn.textContent = this._mode === "edit" ? "Save changes" : "Complete Form"; }
+      if (errorEl) errorEl.textContent = "Error generating PDF: " + err.message;
+      resetBtn();
+      return false;
     }
   },
 
@@ -488,5 +598,18 @@ const SetupSheetForm = {
     return pdfDoc.save();
   },
 };
+
+/* ---- Auto-save on backgrounding ---------------------------------------------
+   iOS fires these when the app is hidden (home button / app switcher) or torn
+   down. Flushing the "new" draft here guarantees an accidental exit never loses
+   entered data, even if the last keystroke's input event was missed. */
+
+function flushDraftOnHide() {
+  if (SetupSheetForm._mode === "new") SetupSheetForm._saveDraft();
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") flushDraftOnHide();
+});
+window.addEventListener("pagehide", flushDraftOnHide);
 
 export default SetupSheetForm;
