@@ -12,13 +12,18 @@
  *     backgrounded (home button), and reload when the sheet is reopened.
  *   - Leaving a form with unsaved entries (History / Settings / logo) prompts
  *     the user to complete & file, keep the draft, or stay.
+ *
+ * Photos (photoGallery.js) are saved as soon as they're added, in every mode.
+ * A draft's photos count as unsaved work and move onto the record when the
+ * sheet is completed.
  */
 
 import Router from "./router.js";
 import SETUP_SHEET_CONFIGS from "./setupSheetConfigs/index.js";
 import Storage from "./storage.js";
-import { exportPdf } from "./share.js";
 import { readDraft, writeDraft, clearDraft, draftHasData } from "./draft.js";
+import { mountPhotoGallery } from "./photoGallery.js";
+import { buildExportBaseName, exportSheet } from "./exportFiles.js";
 
 const NA = "N/A";
 
@@ -57,15 +62,6 @@ function formatDatePdf(iso) {
   if (!iso || !/^\d{4}-\d{2}-\d{2}/.test(iso)) return iso || "";
   const d = new Date(iso + "T00:00:00");
   return d.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric" });
-}
-
-function buildExportFilename(config, record) {
-  const patient = String(record?.patientName || "").trim().replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
-  const date = String(record?.scanDate || "").trim() || (record?.id || "").slice(0, 8);
-  const parts = [config.filenamePrefix];
-  if (patient) parts.push(patient);
-  if (date) parts.push(date);
-  return parts.join("_") + ".pdf";
 }
 
 /* ---- Therapist picker dialog (replaces desktop name+password dialog) ---- */
@@ -119,6 +115,8 @@ const SetupSheetForm = {
   _config: null,
   _mode: "new",
   _record: null,
+  _gallery: null,
+  _photoCount: 0,
 
   async mountNew(container, sheetId) {
     this._container = container;
@@ -190,7 +188,7 @@ const SetupSheetForm = {
 
   _isDirty() {
     if (this._mode === "new") {
-      return draftHasData(this._readDOM(), this._config);
+      return draftHasData(this._readDOM(), this._config) || this._photoCount > 0;
     }
     if (this._mode === "edit" && this._record) {
       const cur = this._readDOM();
@@ -229,6 +227,28 @@ const SetupSheetForm = {
     }
   },
 
+  /* Mounts the Photos section for this sheet: the draft's photos while the
+     sheet is new, the record's photos once it has been filed. */
+  _mountPhotos() {
+    if (this._gallery) this._gallery.unmount();
+    this._gallery = null;
+    this._photoCount = 0;
+    const host = document.getElementById("ss-photos");
+    if (!host) return;
+    const owner = this._record
+      ? Storage.photos.owner.record(this._record.id)
+      : Storage.photos.owner.draft(this._config.id);
+    this._gallery = mountPhotoGallery(host, {
+      owner,
+      exportBaseName: this._record ? buildExportBaseName(this._config, this._record) : null,
+      onChange: (count) => {
+        this._photoCount = count;
+        const exportBtn = document.getElementById("ss-export-btn");
+        if (exportBtn) exportBtn.textContent = count > 0 ? "Export…" : "Export PDF…";
+      },
+    });
+  },
+
   /* Register (new/edit) or drop (view) the navigation guard for this screen. */
   _installGuard() {
     if (this._mode === "new" || this._mode === "edit") {
@@ -256,7 +276,7 @@ const SetupSheetForm = {
             <p class="dialog__desc">
               ${isEdit
                 ? "You have unsaved changes to this sheet. Save them before leaving?"
-                : "This set-up sheet hasn&rsquo;t been filed yet. You can complete and file it now, or keep it as a draft and come back to it later."}
+                : `This set-up sheet hasn&rsquo;t been filed yet. You can complete and file it now, or keep it as a draft and come back to it later.${this._photoCount > 0 ? " Its photos stay with the draft." : ""}`}
             </p>
             <div class="dialog__actions dialog__actions--stacked">
               <button type="button" class="btn btn--primary" id="leave-save">${isEdit ? "Save changes" : "Complete &amp; file"}</button>
@@ -292,6 +312,7 @@ const SetupSheetForm = {
   /* ---- Rendering ---- */
 
   _render(d) {
+    if (this._gallery) { this._gallery.unmount(); this._gallery = null; }
     const readOnly = this._mode === "view";
     const header = this._renderHeader(d);
 
@@ -315,6 +336,7 @@ const SetupSheetForm = {
       ${header}
       <form class="setup-sheet" id="setup-sheet-form" autocomplete="off" ${readOnly ? "data-readonly" : ""}>
         ${sectionsHtml}
+        <section class="setup-sheet__section photo-section" id="ss-photos" aria-label="Photos"></section>
         <div class="setup-sheet__footer">${this._renderFooter()}</div>
         <div class="setup-sheet__error" id="setup-sheet-error"></div>
       </form>
@@ -441,9 +463,20 @@ const SetupSheetForm = {
 
     const clearBtn = document.getElementById("ss-clear-btn");
     if (clearBtn) {
-      clearBtn.addEventListener("click", () => {
-        if (!confirm("Clear all entered values on this draft?")) return;
+      clearBtn.addEventListener("click", async () => {
+        const photos = this._photoCount;
+        const message = photos > 0
+          ? `Clear all entered values on this draft and delete its ${photos} photo${photos === 1 ? "" : "s"}?`
+          : "Clear all entered values on this draft?";
+        if (!confirm(message)) return;
+        if (this._gallery) await this._gallery.whenIdle();
         this._clearDraft();
+        try {
+          await Storage.photos.removeByOwner(Storage.photos.owner.draft(this._config.id));
+        } catch (err) {
+          console.error(err);
+          alert("Could not delete the draft's photos: " + (err.message || err));
+        }
         this.mountNew(this._container, this._config.id);
       });
     }
@@ -474,15 +507,10 @@ const SetupSheetForm = {
 
     const exportBtn = document.getElementById("ss-export-btn");
     if (exportBtn && this._record) {
-      exportBtn.addEventListener("click", async () => {
-        const blob = this._record.pdfBlob;
-        if (!blob) { alert("PDF data is missing for this record."); return; }
-        const filename = buildExportFilename(this._config, this._record);
-        const res = await exportPdf(blob, filename);
-        if (!res.ok && !res.canceled) alert(res.error || "Could not export PDF.");
-      });
+      exportBtn.addEventListener("click", () => exportSheet(this._config, this._record));
     }
 
+    this._mountPhotos();
     this._installGuard();
     this._syncHeaderSave();
   },
@@ -511,6 +539,9 @@ const SetupSheetForm = {
     if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
 
     try {
+      /* Let a photo import that's still running finish, so its photos are
+         filed with the sheet rather than left on the draft. */
+      if (this._gallery) await this._gallery.whenIdle();
       const data = this._readDOM();
 
       let result;

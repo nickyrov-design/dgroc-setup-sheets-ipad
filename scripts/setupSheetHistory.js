@@ -1,12 +1,13 @@
 /**
  * History list. Filter chips by sheet type; tap a row to open in view mode.
  * Toggle to show archived records, per-row archive/unarchive, and a
- * name/patient-id search box.
+ * name/patient-id search box. Rows show how many photos a sheet has; Export
+ * offers the PDF and the photos together.
  */
 
 import SETUP_SHEET_CONFIGS, { SETUP_SHEET_ORDER } from "./setupSheetConfigs/index.js";
 import Storage from "./storage.js";
-import { exportPdf } from "./share.js";
+import { exportSheet } from "./exportFiles.js";
 
 function escapeHtml(s) {
   return String(s ?? "")
@@ -22,15 +23,6 @@ function formatTimestamp(iso) {
   return iso.slice(0, 16).replace("T", " ");
 }
 
-function buildExportFilename(cfg, record) {
-  const patient = String(record?.patientName || "").trim().replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
-  const date = String(record?.scanDate || "").trim() || (record?.id || "").slice(0, 8);
-  const parts = [cfg.filenamePrefix];
-  if (patient) parts.push(patient);
-  if (date) parts.push(date);
-  return parts.join("_") + ".pdf";
-}
-
 function matchesSearch(r, q) {
   if (!q) return true;
   const needle = q.toLowerCase();
@@ -40,23 +32,59 @@ function matchesSearch(r, q) {
   );
 }
 
+function rowHtml(r, photoCount) {
+  const cfg = SETUP_SHEET_CONFIGS[r.sheetId];
+  const stamp = formatTimestamp(r.updatedAt || r.completedAt);
+  const editTag = r.editCount > 0 ? ` &middot; ${r.editCount} edit${r.editCount > 1 ? "s" : ""}` : "";
+  const photoTag = photoCount > 0 ? ` &middot; ${photoCount} photo${photoCount > 1 ? "s" : ""}` : "";
+  const archivedTag = r.archived ? `<span class="history-row__tag">Archived</span>` : "";
+  const archiveBtnLabel = r.archived ? "Unarchive" : "Archive";
+  return `
+    <a class="history-row${r.archived ? " is-archived" : ""}" href="#/form/${encodeURIComponent(r.sheetId)}/${encodeURIComponent(r.id)}" data-record-id="${escapeHtml(r.id)}">
+      <div>
+        <div class="history-row__primary">${escapeHtml(r.patientName || "(no patient name)")}${archivedTag}</div>
+        <div class="history-row__sub">${escapeHtml(cfg?.label || r.sheetId)}${r.patientId ? ` &middot; ${escapeHtml(r.patientId)}` : ""}${photoTag}</div>
+      </div>
+      <div>
+        <div class="history-row__sub">${escapeHtml(r.linac || "")}${r.radiotherapist ? ` &middot; ${escapeHtml(r.radiotherapist)}` : ""}</div>
+        <div class="history-row__sub">${escapeHtml(r.scanDate || "")}</div>
+      </div>
+      <div class="history-row__meta">
+        <div>${escapeHtml(stamp)}</div>
+        <div>by ${escapeHtml(r.completedBy || "?")}${editTag}</div>
+        <div class="history-row__actions">
+          <button type="button" class="btn btn--ghost btn--sm" data-export-id="${escapeHtml(r.id)}" data-sheet-id="${escapeHtml(r.sheetId)}">Export</button>
+          <button type="button" class="btn btn--ghost btn--sm" data-archive-id="${escapeHtml(r.id)}" data-archive-to="${r.archived ? "0" : "1"}">${archiveBtnLabel}</button>
+        </div>
+      </div>
+    </a>
+  `;
+}
+
 const SetupSheetHistory = {
   async mount(container, sheetFilter) {
     this._container = container;
     this._sheetFilter = sheetFilter || null;
     this._search = "";
+    this._photoCounts = new Map();
     this._showArchived = !!(await Storage.settings.get("historyShowArchived"));
     await this._render();
+  },
+
+  _photoCount(r) {
+    return this._photoCounts.get(Storage.photos.owner.record(r.id)) || 0;
   },
 
   async _render() {
     const container = this._container;
     const sheetFilter = this._sheetFilter;
 
-    const [records, archivedCount] = await Promise.all([
+    const [records, archivedCount, photoCounts] = await Promise.all([
       Storage.records.list(sheetFilter || undefined, { includeArchived: this._showArchived }),
       Storage.records.countArchived(sheetFilter || undefined),
+      Storage.photos.countByOwner(),
     ]);
+    this._photoCounts = photoCounts;
 
     const filtered = records.filter((r) => matchesSearch(r, this._search));
 
@@ -73,35 +101,7 @@ const SetupSheetHistory = {
 
     const rowsHtml = filtered.length === 0
       ? `<div class="history-empty">${this._emptyMessage(records.length, this._search)}</div>`
-      : `<div class="history-list">
-          ${filtered.map((r) => {
-            const cfg = SETUP_SHEET_CONFIGS[r.sheetId];
-            const stamp = formatTimestamp(r.updatedAt || r.completedAt);
-            const editTag = r.editCount > 0 ? ` &middot; ${r.editCount} edit${r.editCount > 1 ? "s" : ""}` : "";
-            const archivedTag = r.archived ? `<span class="history-row__tag">Archived</span>` : "";
-            const archiveBtnLabel = r.archived ? "Unarchive" : "Archive";
-            return `
-              <a class="history-row${r.archived ? " is-archived" : ""}" href="#/form/${encodeURIComponent(r.sheetId)}/${encodeURIComponent(r.id)}" data-record-id="${escapeHtml(r.id)}">
-                <div>
-                  <div class="history-row__primary">${escapeHtml(r.patientName || "(no patient name)")}${archivedTag}</div>
-                  <div class="history-row__sub">${escapeHtml(cfg?.label || r.sheetId)}${r.patientId ? ` &middot; ${escapeHtml(r.patientId)}` : ""}</div>
-                </div>
-                <div>
-                  <div class="history-row__sub">${escapeHtml(r.linac || "")}${r.radiotherapist ? ` &middot; ${escapeHtml(r.radiotherapist)}` : ""}</div>
-                  <div class="history-row__sub">${escapeHtml(r.scanDate || "")}</div>
-                </div>
-                <div class="history-row__meta">
-                  <div>${escapeHtml(stamp)}</div>
-                  <div>by ${escapeHtml(r.completedBy || "?")}${editTag}</div>
-                  <div class="history-row__actions">
-                    <button type="button" class="btn btn--ghost btn--sm" data-export-id="${escapeHtml(r.id)}" data-sheet-id="${escapeHtml(r.sheetId)}">Export</button>
-                    <button type="button" class="btn btn--ghost btn--sm" data-archive-id="${escapeHtml(r.id)}" data-archive-to="${r.archived ? "0" : "1"}">${archiveBtnLabel}</button>
-                  </div>
-                </div>
-              </a>
-            `;
-          }).join("")}
-        </div>`;
+      : `<div class="history-list">${filtered.map((r) => rowHtml(r, this._photoCount(r))).join("")}</div>`;
 
     container.innerHTML = `
       <h1 class="page-title">History</h1>
@@ -167,32 +167,7 @@ const SetupSheetHistory = {
       });
     }
 
-    container.querySelectorAll("[data-export-id]").forEach((btn) => {
-      btn.addEventListener("click", async (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const id = btn.dataset.exportId;
-        const sheetId = btn.dataset.sheetId;
-        const record = await Storage.records.get(id);
-        if (!record || !record.pdfBlob) { alert("PDF data missing for this record."); return; }
-        const cfg = SETUP_SHEET_CONFIGS[sheetId];
-        const filename = buildExportFilename(cfg, record);
-        const res = await exportPdf(record.pdfBlob, filename);
-        if (!res.ok && !res.canceled) alert(res.error || "Could not export PDF.");
-      });
-    });
-
-    container.querySelectorAll("[data-archive-id]").forEach((btn) => {
-      btn.addEventListener("click", async (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const id = btn.dataset.archiveId;
-        const archive = btn.dataset.archiveTo === "1";
-        const res = await Storage.records.setArchived(id, archive);
-        if (!res.ok) { alert(res.error || "Could not update record."); return; }
-        await this._render();
-      });
-    });
+    this._bindRowActions(container);
   },
 
   /* Re-render just the rows after a search keystroke (keeps the input focused). */
@@ -215,33 +190,7 @@ const SetupSheetHistory = {
 
     const list = document.createElement("div");
     list.className = "history-list";
-    list.innerHTML = filtered.map((r) => {
-      const cfg = SETUP_SHEET_CONFIGS[r.sheetId];
-      const stamp = formatTimestamp(r.updatedAt || r.completedAt);
-      const editTag = r.editCount > 0 ? ` &middot; ${r.editCount} edit${r.editCount > 1 ? "s" : ""}` : "";
-      const archivedTag = r.archived ? `<span class="history-row__tag">Archived</span>` : "";
-      const archiveBtnLabel = r.archived ? "Unarchive" : "Archive";
-      return `
-        <a class="history-row${r.archived ? " is-archived" : ""}" href="#/form/${encodeURIComponent(r.sheetId)}/${encodeURIComponent(r.id)}" data-record-id="${escapeHtml(r.id)}">
-          <div>
-            <div class="history-row__primary">${escapeHtml(r.patientName || "(no patient name)")}${archivedTag}</div>
-            <div class="history-row__sub">${escapeHtml(cfg?.label || r.sheetId)}${r.patientId ? ` &middot; ${escapeHtml(r.patientId)}` : ""}</div>
-          </div>
-          <div>
-            <div class="history-row__sub">${escapeHtml(r.linac || "")}${r.radiotherapist ? ` &middot; ${escapeHtml(r.radiotherapist)}` : ""}</div>
-            <div class="history-row__sub">${escapeHtml(r.scanDate || "")}</div>
-          </div>
-          <div class="history-row__meta">
-            <div>${escapeHtml(stamp)}</div>
-            <div>by ${escapeHtml(r.completedBy || "?")}${editTag}</div>
-            <div class="history-row__actions">
-              <button type="button" class="btn btn--ghost btn--sm" data-export-id="${escapeHtml(r.id)}" data-sheet-id="${escapeHtml(r.sheetId)}">Export</button>
-              <button type="button" class="btn btn--ghost btn--sm" data-archive-id="${escapeHtml(r.id)}" data-archive-to="${r.archived ? "0" : "1"}">${archiveBtnLabel}</button>
-            </div>
-          </div>
-        </a>
-      `;
-    }).join("");
+    list.innerHTML = filtered.map((r) => rowHtml(r, this._photoCount(r))).join("");
     host.replaceWith(list);
 
     /* Re-bind delegated buttons inside the new list. */
@@ -253,14 +202,10 @@ const SetupSheetHistory = {
       btn.addEventListener("click", async (e) => {
         e.preventDefault();
         e.stopPropagation();
-        const id = btn.dataset.exportId;
-        const sheetId = btn.dataset.sheetId;
-        const record = await Storage.records.get(id);
-        if (!record || !record.pdfBlob) { alert("PDF data missing for this record."); return; }
-        const cfg = SETUP_SHEET_CONFIGS[sheetId];
-        const filename = buildExportFilename(cfg, record);
-        const res = await exportPdf(record.pdfBlob, filename);
-        if (!res.ok && !res.canceled) alert(res.error || "Could not export PDF.");
+        const record = await Storage.records.get(btn.dataset.exportId);
+        const cfg = SETUP_SHEET_CONFIGS[btn.dataset.sheetId];
+        if (!record || !cfg) { alert("Set-up sheet not found."); return; }
+        await exportSheet(cfg, record);
       });
     });
 

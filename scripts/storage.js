@@ -1,14 +1,27 @@
 /**
- * IndexedDB wrapper. Three stores: records, therapists, settings.
+ * IndexedDB wrapper. Six stores: records, therapists, settings, photos,
+ * photoBlobs, photoLabels.
  *
- * records:    keyed by id ("YYYYMMDD-HHMMSS-xxxx") — matches desktop format.
- *             Each row holds the form JSON + the rendered PDF as a Blob.
- * therapists: keyed by uuid. Editable list shown in the completion picker.
- * settings:   key/value bag (default therapist id, etc.)
+ * records:     keyed by id ("YYYYMMDD-HHMMSS-xxxx") — matches desktop format.
+ *              Each row holds the form JSON + the rendered PDF as a Blob.
+ * therapists:  keyed by uuid. Editable list shown in the completion picker.
+ * settings:    key/value bag (default therapist id, etc.)
+ * photos:      keyed by uuid. Photo metadata + a small JPEG thumbnail. `owner`
+ *              (indexed) is "draft:<sheetId>" while the sheet is still a draft
+ *              and "record:<recordId>" once it has been filed.
+ * photoBlobs:  keyed by the photo's uuid. The full-size JPEG, kept out of
+ *              `photos` so listing, labelling and re-homing photos never
+ *              rewrites image data.
+ * photoLabels: keyed by uuid. Editable quick-pick labels for photos, in `order`.
  */
 
 const DB_NAME = "dgroc-setup-sheets";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
+
+/* Seeded when the photoLabels store is created; editable in Settings. */
+const DEFAULT_PHOTO_LABELS = [
+  "Anterior", "Left lateral", "Right lateral", "Superior", "Inferior", "Tattoos", "Immobilisation",
+];
 
 let _dbPromise = null;
 
@@ -44,8 +57,29 @@ function openDb() {
           cursor.continue();
         };
       }
+      /* v2 -> v3: photo attachments and their label list. */
+      if (!db.objectStoreNames.contains("photos")) {
+        const photos = db.createObjectStore("photos", { keyPath: "id" });
+        photos.createIndex("owner", "owner", { unique: false });
+      }
+      if (!db.objectStoreNames.contains("photoBlobs")) {
+        db.createObjectStore("photoBlobs", { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains("photoLabels")) {
+        const labels = db.createObjectStore("photoLabels", { keyPath: "id" });
+        DEFAULT_PHOTO_LABELS.forEach((name, order) => labels.add({ id: uuid(), name, order }));
+      }
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      const db = req.result;
+      /* Don't block a schema upgrade or "Wipe all app data" from another
+         connection — close this one and reopen on next use. */
+      db.onversionchange = () => {
+        db.close();
+        _dbPromise = null;
+      };
+      resolve(db);
+    };
     req.onerror = () => reject(req.error);
   });
   return _dbPromise;
@@ -53,6 +87,19 @@ function openDb() {
 
 function tx(storeName, mode = "readonly") {
   return openDb().then((db) => db.transaction(storeName, mode).objectStore(storeName));
+}
+
+/* A transaction spanning several stores, for writes that must land together. */
+function txStores(storeNames, mode = "readonly") {
+  return openDb().then((db) => db.transaction(storeNames, mode));
+}
+
+function txDone(t) {
+  return new Promise((resolve, reject) => {
+    t.oncomplete = () => resolve();
+    t.onerror = (e) => reject(e.target.error || t.error);
+    t.onabort = () => reject(t.error || new DOMException("Transaction aborted.", "AbortError"));
+  });
 }
 
 function reqAsPromise(req) {
@@ -76,10 +123,16 @@ function uuid() {
   return "id-" + Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
+const photoOwner = {
+  draft: (sheetId) => `draft:${sheetId}`,
+  record: (recordId) => `record:${recordId}`,
+};
+
 /* ---- records ---- */
 
 async function saveRecord(sheetId, formData, pdfBlob) {
-  const store = await tx("records", "readwrite");
+  const t = await txStores(["records", "photos"], "readwrite");
+  const store = t.objectStore("records");
   let id = generateId();
   while (await reqAsPromise(store.get(id))) id = generateId();
   const record = {
@@ -90,7 +143,13 @@ async function saveRecord(sheetId, formData, pdfBlob) {
     archived: false,
     pdfBlob,
   };
-  await reqAsPromise(store.add(record));
+  store.add(record);
+  /* Photos attached while this sheet was a draft move onto the filed record in
+     the same transaction, so they can never be left behind on the draft. */
+  const photos = t.objectStore("photos");
+  const drafted = await reqAsPromise(photos.index("owner").getAll(photoOwner.draft(sheetId)));
+  for (const p of drafted) photos.put({ ...p, owner: photoOwner.record(id) });
+  await txDone(t);
   return { ok: true, id };
 }
 
@@ -210,8 +269,177 @@ async function getRecord(id) {
 }
 
 async function deleteRecord(id) {
-  const store = await tx("records", "readwrite");
+  const t = await txStores(["records", "photos", "photoBlobs"], "readwrite");
+  t.objectStore("records").delete(id);
+  await queuePhotoDeletes(t, photoOwner.record(id));
+  await txDone(t);
+  return { ok: true };
+}
+
+/* ---- photos ---- */
+
+/* Queues deletion of every photo under `owner` in an open photos + photoBlobs
+   transaction. Resolves to the number of photos queued. */
+async function queuePhotoDeletes(t, owner) {
+  const photos = t.objectStore("photos");
+  const blobs = t.objectStore("photoBlobs");
+  const ids = await reqAsPromise(photos.index("owner").getAllKeys(owner));
+  for (const id of ids) {
+    photos.delete(id);
+    blobs.delete(id);
+  }
+  return ids.length;
+}
+
+/* Sort key for photos: add order, unique even within one multi-photo import. */
+let _lastPhotoStamp = 0;
+function nextPhotoStamp() {
+  _lastPhotoStamp = Math.max(Date.now(), _lastPhotoStamp + 1);
+  return _lastPhotoStamp;
+}
+
+/* `image` is the output of processPhotoFile(): { blob, thumb, width, height }. */
+async function addPhoto(owner, image) {
+  const t = await txStores(["photos", "photoBlobs"], "readwrite");
+  const photo = {
+    id: uuid(),
+    owner,
+    label: "",
+    width: image.width,
+    height: image.height,
+    size: image.blob.size,
+    thumb: image.thumb,
+    thumbSize: image.thumb.size,
+    createdAt: nextPhotoStamp(),
+    addedAt: new Date().toISOString(),
+  };
+  t.objectStore("photos").add(photo);
+  t.objectStore("photoBlobs").add({ id: photo.id, blob: image.blob });
+  await txDone(t);
+  return { ok: true, photo };
+}
+
+/* Photo metadata (with thumbnails) for one owner, in the order added. */
+async function listPhotos(owner) {
+  const store = await tx("photos");
+  const rows = await reqAsPromise(store.index("owner").getAll(owner));
+  rows.sort((a, b) => a.createdAt - b.createdAt);
+  return rows;
+}
+
+/* Full-size JPEG Blobs for the given photo ids, in the same order (null if missing). */
+async function getPhotoBlobs(ids) {
+  const store = await tx("photoBlobs");
+  const rows = await Promise.all(ids.map((id) => reqAsPromise(store.get(id))));
+  return rows.map((row) => row?.blob || null);
+}
+
+async function setPhotoLabel(id, label) {
+  const store = await tx("photos", "readwrite");
+  const cur = await reqAsPromise(store.get(id));
+  if (!cur) return { ok: false, error: "Photo not found." };
+  const next = { ...cur, label: String(label || "").trim() };
+  await reqAsPromise(store.put(next));
+  return { ok: true, photo: next };
+}
+
+async function removePhoto(id) {
+  const t = await txStores(["photos", "photoBlobs"], "readwrite");
+  t.objectStore("photos").delete(id);
+  t.objectStore("photoBlobs").delete(id);
+  await txDone(t);
+  return { ok: true };
+}
+
+/* Deletes every photo under one owner, or under each owner in an array. */
+async function removePhotosByOwner(owners) {
+  const list = Array.isArray(owners) ? owners : [owners];
+  const t = await txStores(["photos", "photoBlobs"], "readwrite");
+  let removed = 0;
+  for (const owner of list) removed += await queuePhotoDeletes(t, owner);
+  await txDone(t);
+  return { ok: true, removed };
+}
+
+async function removeArchivedPhotos() {
+  const archived = await listRecords(undefined, { archivedOnly: true });
+  if (!archived.length) return { ok: true, removed: 0 };
+  return removePhotosByOwner(archived.map((r) => photoOwner.record(r.id)));
+}
+
+/* Map of owner -> photo count, read from the index alone (no image data). */
+async function countPhotosByOwner() {
+  const store = await tx("photos");
+  const counts = new Map();
+  await new Promise((resolve, reject) => {
+    const req = store.index("owner").openKeyCursor();
+    req.onsuccess = () => {
+      const cursor = req.result;
+      if (!cursor) { resolve(); return; }
+      counts.set(cursor.key, (counts.get(cursor.key) || 0) + 1);
+      cursor.continue();
+    };
+    req.onerror = () => reject(req.error);
+  });
+  return counts;
+}
+
+async function photoStats() {
+  const store = await tx("photos");
+  const rows = await reqAsPromise(store.getAll());
+  let bytes = 0;
+  for (const p of rows) bytes += (p.size || 0) + (p.thumbSize || 0);
+  return { count: rows.length, bytes };
+}
+
+/* ---- photo labels ---- */
+
+async function listPhotoLabels() {
+  const store = await tx("photoLabels");
+  const all = await reqAsPromise(store.getAll());
+  all.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  return all;
+}
+
+async function addPhotoLabel(name) {
+  const trimmed = String(name || "").trim();
+  if (!trimmed) return { ok: false, error: "Label required." };
+  const all = await listPhotoLabels();
+  if (all.some((l) => l.name.toLowerCase() === trimmed.toLowerCase())) {
+    return { ok: false, error: "That label is already in the list." };
+  }
+  const order = all.length ? (all[all.length - 1].order ?? all.length - 1) + 1 : 0;
+  const store = await tx("photoLabels", "readwrite");
+  const id = uuid();
+  await reqAsPromise(store.add({ id, name: trimmed, order }));
+  return { ok: true, id };
+}
+
+async function renamePhotoLabel(id, name) {
+  const trimmed = String(name || "").trim();
+  if (!trimmed) return { ok: false, error: "Label required." };
+  const store = await tx("photoLabels", "readwrite");
+  const cur = await reqAsPromise(store.get(id));
+  if (!cur) return { ok: false, error: "Label not found." };
+  await reqAsPromise(store.put({ ...cur, name: trimmed }));
+  return { ok: true };
+}
+
+async function removePhotoLabel(id) {
+  const store = await tx("photoLabels", "readwrite");
   await reqAsPromise(store.delete(id));
+  return { ok: true };
+}
+
+/* Swaps a label with its neighbour (delta -1 = up, +1 = down) and renumbers the list. */
+async function movePhotoLabel(id, delta) {
+  const all = await listPhotoLabels();
+  const i = all.findIndex((l) => l.id === id);
+  const j = i + delta;
+  if (i < 0 || j < 0 || j >= all.length) return { ok: false, error: "Label can't move further." };
+  [all[i], all[j]] = [all[j], all[i]];
+  const store = await tx("photoLabels", "readwrite");
+  await Promise.all(all.map((l, order) => reqAsPromise(store.put({ ...l, order }))));
   return { ok: true };
 }
 
@@ -277,6 +505,25 @@ export default {
     countArchived,
     archiveOlderThan,
     countOlderThan,
+  },
+  photos: {
+    owner: photoOwner,
+    add: addPhoto,
+    list: listPhotos,
+    getBlobs: getPhotoBlobs,
+    setLabel: setPhotoLabel,
+    remove: removePhoto,
+    removeByOwner: removePhotosByOwner,
+    removeArchived: removeArchivedPhotos,
+    countByOwner: countPhotosByOwner,
+    stats: photoStats,
+  },
+  photoLabels: {
+    list: listPhotoLabels,
+    add: addPhotoLabel,
+    rename: renamePhotoLabel,
+    remove: removePhotoLabel,
+    move: movePhotoLabel,
   },
   therapists: { list: listTherapists, add: addTherapist, rename: renameTherapist, remove: removeTherapist },
   settings: { get: getSetting, set: setSetting },

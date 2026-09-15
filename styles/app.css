@@ -692,6 +692,300 @@ button { cursor: pointer; }
   flex-shrink: 0;
 }
 
+/* ---- Photos (set-up sheet) ---- */
+
+.photo-section__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+  margin-bottom: 14px;
+}
+
+.photo-section__head .setup-sheet__section-title { margin: 0; }
+
+.photo-section__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* The file input sits inside its label so a tap opens the iOS picker
+   natively. It is visually hidden, not display:none. */
+.photo-section__add {
+  position: relative;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.photo-section__add input[type="file"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.photo-section__add.is-disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.photo-tile {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.photo-tile__open {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  padding: 0;
+  overflow: hidden;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.photo-tile__open:active { border-color: var(--accent); }
+
+/* No long-press "Save to Photos" callout or drag on patient photos. */
+.photo-tile__open img,
+.photo-viewer__img {
+  pointer-events: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.photo-tile__open img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.photo-tile__num {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  min-width: 24px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(11, 18, 32, 0.78);
+  color: var(--text);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.photo-tile__label {
+  min-height: 36px;
+  padding: 6px 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 0.85rem;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.photo-tile__label.is-empty {
+  color: var(--text-dim);
+  border-style: dashed;
+}
+
+.photo-section__empty {
+  margin: 0;
+  color: var(--text-dim);
+}
+
+.photo-section__hint {
+  margin: 12px 0 0;
+  color: var(--text-dim);
+  font-size: 0.82rem;
+}
+
+.photo-section__status {
+  margin: 8px 0 0;
+  color: var(--text-dim);
+  font-size: 0.9rem;
+}
+
+.photo-section__status:empty { display: none; }
+.photo-section__status.is-error { color: var(--danger); }
+
+/* ---- Export dialog ---- */
+
+.export-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  margin-bottom: 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.export-option input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  margin: 1px 0 0;
+  accent-color: var(--accent);
+}
+
+.export-option__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.export-option__title { font-weight: 600; }
+
+.export-option__sub {
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+/* ---- Photo label picker ---- */
+
+/* Above the photo viewer, and pinned high so the iPad keyboard can't cover it. */
+.photo-label-dialog {
+  z-index: 300;
+  align-items: flex-start;
+  padding-top: calc(48px + env(safe-area-inset-top));
+}
+
+.photo-label-dialog .dialog__actions { flex-wrap: wrap; }
+
+.label-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.label-chip {
+  min-height: 40px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-card);
+  color: var(--text);
+}
+
+.label-chip.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* ---- Photo viewer ---- */
+
+html.has-photo-viewer,
+html.has-photo-viewer body { overflow: hidden; }
+
+.photo-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  background: #000;
+  touch-action: none;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.photo-viewer__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px calc(16px + env(safe-area-inset-right)) 10px calc(16px + env(safe-area-inset-left));
+  background: var(--bg-elev);
+}
+
+.photo-viewer__count {
+  color: var(--text-dim);
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.photo-viewer__stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.photo-viewer__img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  transform-origin: 50% 50%;
+}
+
+.photo-viewer__nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(11, 18, 32, 0.6);
+  color: #fff;
+}
+
+.photo-viewer__nav[hidden] { display: none; }
+.photo-viewer__nav--prev { left: calc(12px + env(safe-area-inset-left)); }
+.photo-viewer__nav--next { right: calc(12px + env(safe-area-inset-right)); }
+
+.photo-viewer__label {
+  min-height: 40px;
+  max-width: 60%;
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-card);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.photo-viewer__label.is-empty {
+  color: var(--text-dim);
+  border-style: dashed;
+}
+
 /* ---- iPad-specific tweaks ---- */
 
 @media (max-width: 600px) {
@@ -700,4 +994,5 @@ button { cursor: pointer; }
   .history-row { grid-template-columns: 1fr; }
   .history-row__meta { text-align: left; }
   .history-row__actions { justify-content: flex-start; }
+  .photo-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
 }

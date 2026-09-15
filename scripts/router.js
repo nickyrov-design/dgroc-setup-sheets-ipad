@@ -7,9 +7,26 @@
  *   #/history/<sheetId>           -> history filtered by sheet
  *   #/settings                    -> settings screen
  *   #/therapists                  -> therapist list editor
+ *   #/photo-labels                -> photo label list editor
  */
 
 const routes = [];
+
+/**
+ * One-shot cleanups for the current screen (e.g. releasing photo thumbnails,
+ * closing the photo viewer). Run and cleared on the next dispatch.
+ */
+let _leaveHandlers = [];
+
+function onLeave(fn) { _leaveHandlers.push(fn); }
+
+function runLeaveHandlers() {
+  const handlers = _leaveHandlers;
+  _leaveHandlers = [];
+  for (const fn of handlers) {
+    try { fn(); } catch (err) { console.error(err); }
+  }
+}
 
 /**
  * Optional navigation guard. A mounted screen (currently the set-up sheet form)
@@ -63,6 +80,7 @@ function navigate(path) {
 }
 
 function dispatch() {
+  runLeaveHandlers();
   /* Any guard belonged to the screen we are leaving; a new screen re-registers
      its own on mount. Clearing here keeps a stale guard from firing on the
      next page. */
@@ -124,4 +142,4 @@ function start() {
   dispatch();
 }
 
-export default { register, navigate, start, setGuard, clearGuard };
+export default { register, navigate, start, setGuard, clearGuard, onLeave };
