@@ -105,7 +105,7 @@ assets/
 scripts/
 ├── app.js                      Entry point, route registrations
 ├── router.js                   Hash-based router
-├── storage.js                  IndexedDB wrapper (records, photos, labels, therapists, settings)
+├── storage.js                  IndexedDB wrapper (records, PDFs, photos, labels, therapists, settings)
 ├── share.js                    Web Share API helper for PDF / photo export
 ├── exportFiles.js              Export filenames + the Export dialog (PDF and photos)
 ├── draft.js                    Draft persistence for unfinished sheets

@@ -1,19 +1,23 @@
 /**
- * IndexedDB wrapper. Six stores: records, therapists, settings, photos,
+ * IndexedDB wrapper. Seven stores: records, pdfs, therapists, settings, photos,
  * photoBlobs, photoLabels.
  *
+ * Rows that get rewritten hold no Blobs: iOS Safari often fails to store a
+ * Blob that was read back out of IndexedDB ("Error preparing Blob/File data to
+ * be stored in object store", WebKit bugs 235687 / 240216).
+ *
  * records:     keyed by id ("YYYYMMDD-HHMMSS-xxxx") — matches desktop format.
- *              Each row holds the form JSON + the rendered PDF as a Blob.
+ *              Each row holds the form JSON. Rewritten when archiving.
+ * pdfs:        keyed by record id. The rendered PDF as a Blob, kept out of
+ *              `records` so archiving never rewrites it. Only ever written
+ *              with a freshly made PDF.
  * therapists:  keyed by uuid. Editable list shown in the completion picker.
  * settings:    key/value bag (default therapist id, etc.)
  * photos:      keyed by uuid. Photo metadata + a small JPEG thumbnail, kept as
- *              an ArrayBuffer rather than a Blob: these rows are rewritten
- *              (filing a draft, labelling), and iOS Safari often fails to
- *              store a Blob that was read back out of IndexedDB ("Error
- *              preparing Blob/File data to be stored in object store", WebKit
- *              bugs 235687 / 240216). `owner` (indexed) is "draft:<sheetId>"
- *              while the sheet is still a draft and "record:<recordId>" once
- *              it has been filed.
+ *              an ArrayBuffer rather than a Blob because these rows are
+ *              rewritten (filing a draft, labelling). `owner` (indexed) is
+ *              "draft:<sheetId>" while the sheet is still a draft and
+ *              "record:<recordId>" once it has been filed.
  * photoBlobs:  keyed by the photo's uuid. The full-size JPEG, kept out of
  *              `photos` so listing, labelling and re-homing photos never
  *              rewrites image data.
@@ -21,7 +25,7 @@
  */
 
 const DB_NAME = "dgroc-setup-sheets";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 /* Seeded when the photoLabels store is created; editable in Settings. */
 const DEFAULT_PHOTO_LABELS = [
@@ -74,6 +78,10 @@ function openDb() {
         const labels = db.createObjectStore("photoLabels", { keyPath: "id" });
         DEFAULT_PHOTO_LABELS.forEach((name, order) => labels.add({ id: uuid(), name, order }));
       }
+      /* v3 -> v4: PDFs get their own store (existing ones moved by moveLegacyPdfs). */
+      if (!db.objectStoreNames.contains("pdfs")) {
+        db.createObjectStore("pdfs", { keyPath: "id" });
+      }
     };
     req.onsuccess = () => {
       const db = req.result;
@@ -88,6 +96,7 @@ function openDb() {
     req.onerror = () => reject(req.error);
   }).then(async (db) => {
     await convertLegacyThumbs(db);
+    await moveLegacyPdfs(db);
     return db;
   });
   return _dbPromise;
@@ -122,6 +131,42 @@ async function convertLegacyThumbs(db) {
     await txDone(t);
   } catch (err) {
     console.error("Could not convert photo thumbnails:", err);
+  }
+}
+
+/* Settings key set once no record holds its own PDF. */
+const PDFS_MOVED = "pdfsInOwnStore";
+
+/* Records saved before v4 hold their PDF as a Blob, so archiving one rewrote a
+   Blob read out of IndexedDB. Move each PDF into `pdfs` once, as a new Blob
+   made from its bytes, one record per transaction so an interrupted run
+   carries on where it stopped. Like convertLegacyThumbs, never stops the app
+   opening. */
+async function moveLegacyPdfs(db) {
+  try {
+    const done = await reqAsPromise(db.transaction("settings").objectStore("settings").get(PDFS_MOVED));
+    if (done?.value) return;
+    const records = await reqAsPromise(db.transaction("records").objectStore("records").getAll());
+    let failed = 0;
+    for (const rec of records) {
+      if (!("pdfBlob" in rec)) continue;
+      const { pdfBlob, ...rest } = rec;
+      try {
+        const pdf = pdfBlob ? new Blob([await pdfBlob.arrayBuffer()], { type: "application/pdf" }) : null;
+        const t = db.transaction(["records", "pdfs"], "readwrite");
+        if (pdf) t.objectStore("pdfs").put({ id: rec.id, blob: pdf });
+        t.objectStore("records").put(rest);
+        await txDone(t);
+      } catch (err) {
+        console.error(`Could not move the PDF of record ${rec.id}:`, err);
+        failed++;
+      }
+    }
+    if (!failed) {
+      await reqAsPromise(db.transaction("settings", "readwrite").objectStore("settings").put({ key: PDFS_MOVED, value: true }));
+    }
+  } catch (err) {
+    console.error("Could not move PDFs out of records:", err);
   }
 }
 
@@ -171,7 +216,7 @@ const photoOwner = {
 /* ---- records ---- */
 
 async function saveRecord(sheetId, formData, pdfBlob) {
-  const t = await txStores(["records", "photos"], "readwrite");
+  const t = await txStores(["records", "pdfs", "photos"], "readwrite");
   const store = t.objectStore("records");
   let id = generateId();
   while (await reqAsPromise(store.get(id))) id = generateId();
@@ -181,9 +226,9 @@ async function saveRecord(sheetId, formData, pdfBlob) {
     sheetId,
     status: "completed",
     archived: false,
-    pdfBlob,
   };
   store.add(record);
+  t.objectStore("pdfs").put({ id, blob: pdfBlob });
   /* Photos attached while this sheet was a draft move onto the filed record in
      the same transaction, so they can never be left behind on the draft. */
   const photos = t.objectStore("photos");
@@ -194,7 +239,8 @@ async function saveRecord(sheetId, formData, pdfBlob) {
 }
 
 async function updateRecord(id, formData, pdfBlob, editor) {
-  const store = await tx("records", "readwrite");
+  const t = await txStores(["records", "pdfs"], "readwrite");
+  const store = t.objectStore("records");
   const prev = await reqAsPromise(store.get(id));
   if (!prev) return { ok: false, error: "Set-up sheet not found." };
 
@@ -218,9 +264,10 @@ async function updateRecord(id, formData, pdfBlob, editor) {
     completedAt: prev.completedAt || formData.completedAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     editHistory: history,
-    pdfBlob,
   };
-  await reqAsPromise(store.put(next));
+  store.put(next);
+  t.objectStore("pdfs").put({ id, blob: pdfBlob });
+  await txDone(t);
   return { ok: true, id };
 }
 
@@ -303,14 +350,21 @@ async function countOlderThan(isoCutoff) {
   return n;
 }
 
+/* The record with its PDF as `pdfBlob`. Read-only: never write it back. */
 async function getRecord(id) {
-  const store = await tx("records");
-  return reqAsPromise(store.get(id));
+  const t = await txStores(["records", "pdfs"]);
+  const [record, pdf] = await Promise.all([
+    reqAsPromise(t.objectStore("records").get(id)),
+    reqAsPromise(t.objectStore("pdfs").get(id)),
+  ]);
+  /* A record whose PDF couldn't be moved yet still carries its own. */
+  return record && pdf ? { ...record, pdfBlob: pdf.blob } : record;
 }
 
 async function deleteRecord(id) {
-  const t = await txStores(["records", "photos", "photoBlobs"], "readwrite");
+  const t = await txStores(["records", "pdfs", "photos", "photoBlobs"], "readwrite");
   t.objectStore("records").delete(id);
+  t.objectStore("pdfs").delete(id);
   await queuePhotoDeletes(t, photoOwner.record(id));
   await txDone(t);
   return { ok: true };
