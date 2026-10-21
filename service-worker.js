@@ -1,7 +1,7 @@
 /* Setup Sheets PWA — offline cache.
    Bump CACHE_VERSION on any code/template change so installed clients pick it up. */
 
-const CACHE_VERSION = "v5";
+const CACHE_VERSION = "v6";
 const CACHE_NAME = `setup-sheets-${CACHE_VERSION}`;
 
 const PRECACHE = [
@@ -37,8 +37,10 @@ const PRECACHE = [
 ];
 
 self.addEventListener("install", (event) => {
+  /* "reload" skips the HTTP cache, so a new version never precaches old files. */
+  const requests = PRECACHE.map((url) => new Request(url, { cache: "reload" }));
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE)).then(() => self.skipWaiting())
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(requests)).then(() => self.skipWaiting())
   );
 });
 

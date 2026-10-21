@@ -106,7 +106,7 @@ export function mountPhotoGallery(host, { owner, exportBaseName = null, onChange
   }
 
   function tileHtml(photo, i) {
-    const url = URL.createObjectURL(photo.thumb);
+    const url = URL.createObjectURL(new Blob([photo.thumb], { type: "image/jpeg" }));
     state.urls.set(photo.id, url);
     const label = photo.label || "";
     return `

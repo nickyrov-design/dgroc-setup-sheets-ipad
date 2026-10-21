@@ -6,9 +6,14 @@
  *              Each row holds the form JSON + the rendered PDF as a Blob.
  * therapists:  keyed by uuid. Editable list shown in the completion picker.
  * settings:    key/value bag (default therapist id, etc.)
- * photos:      keyed by uuid. Photo metadata + a small JPEG thumbnail. `owner`
- *              (indexed) is "draft:<sheetId>" while the sheet is still a draft
- *              and "record:<recordId>" once it has been filed.
+ * photos:      keyed by uuid. Photo metadata + a small JPEG thumbnail, kept as
+ *              an ArrayBuffer rather than a Blob: these rows are rewritten
+ *              (filing a draft, labelling), and iOS Safari often fails to
+ *              store a Blob that was read back out of IndexedDB ("Error
+ *              preparing Blob/File data to be stored in object store", WebKit
+ *              bugs 235687 / 240216). `owner` (indexed) is "draft:<sheetId>"
+ *              while the sheet is still a draft and "record:<recordId>" once
+ *              it has been filed.
  * photoBlobs:  keyed by the photo's uuid. The full-size JPEG, kept out of
  *              `photos` so listing, labelling and re-homing photos never
  *              rewrites image data.
@@ -81,8 +86,43 @@ function openDb() {
       resolve(db);
     };
     req.onerror = () => reject(req.error);
+  }).then(async (db) => {
+    await convertLegacyThumbs(db);
+    return db;
   });
   return _dbPromise;
+}
+
+/* Settings key set once every photo's thumbnail is stored as bytes. */
+const THUMBS_AS_BYTES = "photoThumbsAsBytes";
+
+/* Photos added before thumbnails were kept as bytes hold them as Blobs. Rewrite
+   those rows once, before anything else uses the database, so filing a draft
+   or labelling a photo never puts a Blob from IndexedDB back into it. Never
+   stops the app opening: a failure is logged and retried on the next launch. */
+async function convertLegacyThumbs(db) {
+  try {
+    const done = await reqAsPromise(db.transaction("settings").objectStore("settings").get(THUMBS_AS_BYTES));
+    if (done?.value) return;
+    const rows = await reqAsPromise(db.transaction("photos").objectStore("photos").getAll());
+    const converted = [];
+    let failed = 0;
+    for (const p of rows) {
+      if (!(p.thumb instanceof Blob)) continue;
+      try {
+        converted.push({ ...p, thumb: await p.thumb.arrayBuffer() });
+      } catch (err) {
+        console.error(`Could not read the thumbnail of photo ${p.id}:`, err);
+        failed++;
+      }
+    }
+    const t = db.transaction(["photos", "settings"], "readwrite");
+    for (const p of converted) t.objectStore("photos").put(p);
+    if (!failed) t.objectStore("settings").put({ key: THUMBS_AS_BYTES, value: true });
+    await txDone(t);
+  } catch (err) {
+    console.error("Could not convert photo thumbnails:", err);
+  }
 }
 
 function tx(storeName, mode = "readonly") {
@@ -298,8 +338,12 @@ function nextPhotoStamp() {
   return _lastPhotoStamp;
 }
 
-/* `image` is the output of processPhotoFile(): { blob, thumb, width, height }. */
+/* `image` is the output of processPhotoFile(): { blob, thumb, width, height }.
+   The thumbnail is stored as bytes (see the photos store above). */
 async function addPhoto(owner, image) {
+  /* Read before the transaction opens — awaiting anything but IndexedDB inside
+     one lets it commit early. */
+  const thumb = await image.thumb.arrayBuffer();
   const t = await txStores(["photos", "photoBlobs"], "readwrite");
   const photo = {
     id: uuid(),
@@ -308,8 +352,8 @@ async function addPhoto(owner, image) {
     width: image.width,
     height: image.height,
     size: image.blob.size,
-    thumb: image.thumb,
-    thumbSize: image.thumb.size,
+    thumb,
+    thumbSize: thumb.byteLength,
     createdAt: nextPhotoStamp(),
     addedAt: new Date().toISOString(),
   };
@@ -319,7 +363,7 @@ async function addPhoto(owner, image) {
   return { ok: true, photo };
 }
 
-/* Photo metadata (with thumbnails) for one owner, in the order added. */
+/* Photo metadata (with thumbnail bytes) for one owner, in the order added. */
 async function listPhotos(owner) {
   const store = await tx("photos");
   const rows = await reqAsPromise(store.index("owner").getAll(owner));

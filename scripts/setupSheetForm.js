@@ -575,7 +575,7 @@ const SetupSheetForm = {
       return true;
     } catch (err) {
       console.error(err);
-      if (errorEl) errorEl.textContent = "Error generating PDF: " + err.message;
+      if (errorEl) errorEl.textContent = "Could not save sheet: " + err.message;
       resetBtn();
       return false;
     }
