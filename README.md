@@ -6,6 +6,7 @@ A standalone Progressive Web App port of the **Setup Sheet Form Filler** tool fr
 
 - Three patient set-up sheets — Extremity, Head and Neck, Omniboard.
 - Same fields, same PDF coordinates, same templates as the desktop tool.
+- A scan checklist for the site being scanned (8 treatment sites, plus Other / general), printed on a Scan Checklist page after the set-up sheet in the PDF.
 - Completed sheets stored on-device (IndexedDB), tappable in a History list.
 - Set-up photos attached to a sheet — taken in the app or chosen from the iPad — with optional labels.
 - Export any saved PDF and its photos (as JPGs) via iOS share sheet → Files (including network folders) / pCloud / iCloud Drive / etc.
@@ -41,7 +42,24 @@ After first load the app is cached for offline use — Wi-Fi only needed for cod
 2. Tap **Edit list** → add the names of all therapists and students who will use the iPad. The first one you add becomes the default automatically.
 3. Optionally pick a different default therapist on the Settings screen.
 
+4. Check **Settings → Radiation oncologists**. It starts with Dr Kotzen, Dr Hugo, Dr Tunmer, Dr Chetty and Dr Mutsoane; add, rename, reorder or remove names as needed.
+
 You can now tap a sheet card on the landing screen and start filling.
+
+## Scan checklists
+
+Every new sheet has a scan checklist, on by default.
+
+- After you tap a sheet card, **Which site are you scanning?** asks for the site: Breast (Left or Right), Head and neck, Pelvis, SBRT – Pancreas, SBRT – Liver, SBRT – Lung, SBRT – Para-aortic lymph nodes, Cranial SRS, or Other / general (patient details and final checks only). **Choose later** leaves it for now; **No checklist for this sheet** turns it off after an "Are you sure?".
+- The sheet then has two tabs: **Set-up sheet** and **Scan checklist** (with a count such as 12/35). The checklist tab has the on/off switch, the site (**Change site**), the patient and scan details, the site's items with its **Escalate** warning above them, and the final checks.
+- Tap **✓** or **N/A** for each item (tap again to clear). Tapping an item's text ticks it.
+- Patient name / ID, date of planning scan and person performing the scan come from the set-up sheet (Patient name, Patient ID, Scan date, Radiotherapist), so they're only typed once. Pick the treating radiation oncologist and who reviewed the checklist from the lists, and add any outstanding queries or comments.
+- **Complete Form** / **Save** warns if anything on the checklist is still open, with **Go to checklist** or **Complete anyway**.
+- Changing the site clears the old site's ticks (after asking); patient details and final checks are kept.
+- The checklist is printed on a **Scan Checklist** page straight after the set-up sheet in the same PDF: DGROC letterhead, "Scan Checklist", "Site: …", the details, the site's items and Escalate warning, the final checks and the "Important" note. Each site fits on one A4 page; very long comments carry on to a second page.
+- History shows each sheet's site, and the search box finds sheets by site.
+
+Sheets completed before this update have no checklist and are unchanged.
 
 ## Set-up photos
 
@@ -101,6 +119,7 @@ vendor/pdf-lib.min.js           PDF rendering library, bundled for offline use
 styles/app.css                  Touch-optimised styles
 assets/
 ├── icons/                      Logo / PWA icons
+├── letterhead.jpg              DGROC letterhead for the Scan Checklist page
 └── templates/                  The 3 blank PDF templates (copied verbatim from the desktop app)
 scripts/
 ├── app.js                      Entry point, route registrations
@@ -111,12 +130,18 @@ scripts/
 ├── draft.js                    Draft persistence for unfinished sheets
 ├── setupSheetLanding.js        Landing screen (3 sheet cards)
 ├── setupSheetForm.js           Form renderer + PDF stamping (pdf-lib)
+├── scanChecklists.js           Scan checklist wording (sites, final checks, details)
+├── checklistState.js           Scan checklist state: drafts, records, progress, warnings
+├── checklistSection.js         Scan checklist tab, site picker and its dialogs
+├── checklistPdf.js             Scan Checklist page(s) in the PDF
 ├── photoGallery.js             Photos section of a sheet (add, label, grid)
 ├── photoViewer.js              Full-screen photo viewer (swipe, zoom)
 ├── photos.js                   Photo import: JPEG conversion + thumbnails
 ├── setupSheetHistory.js        History list
 ├── therapistsPanel.js          Therapist list editor
+├── listEditorPanel.js          Shared editor for ordered name lists
 ├── photoLabelsPanel.js         Photo label list editor
+├── oncologistsPanel.js         Radiation oncologist list editor
 ├── settingsPanel.js            Settings screen
 └── setupSheetConfigs/          The 3 sheet definitions, copied verbatim from desktop
     ├── index.js
@@ -132,6 +157,16 @@ The configs in `scripts/setupSheetConfigs/` are byte-identical to their desktop 
 1. Update the config in the desktop repo first (so coordinate work is shared).
 2. Copy the updated config and the regenerated `.pdf` template into this repo.
 3. Bump `CACHE_VERSION` in `service-worker.js` and push.
+
+## Updating the scan checklist wording
+
+All checklist wording lives in `scripts/scanChecklists.js`, typed in word for word from the departmental "Radiotherapy planning scan – Scanner checklist" document. Only Breast, Head and neck and Pelvis have an Escalate warning in that document, so the other sites have none.
+
+1. Edit the wording there. Give any new item a new id; never reuse an old id for a different item.
+2. Bump `CHECKLIST_VERSION` in the same file.
+3. Bump `CACHE_VERSION` in `service-worker.js` and push.
+
+Completed sheets keep a copy of the wording they were completed with, so their checklist and PDF never change.
 
 ## Known iOS limitations
 

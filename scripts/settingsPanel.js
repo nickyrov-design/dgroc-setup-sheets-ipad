@@ -1,6 +1,6 @@
 /**
- * Settings screen. Pick the default therapist, link out to the therapist and
- * photo label editors, free up photo storage, and offer a destructive
+ * Settings screen. Pick the default therapist, link out to the therapist,
+ * photo label and radiation oncologist editors, free up photo storage, and offer a destructive
  * "wipe all app data" action for fresh starts.
  */
 
@@ -35,7 +35,7 @@ const SettingsPanel = {
       return d.toISOString();
     })();
 
-    const [therapists, defaultId, records, archivedRecords, archivableCount, photoStats, photoCounts, photoLabels] = await Promise.all([
+    const [therapists, defaultId, records, archivedRecords, archivableCount, photoStats, photoCounts, photoLabels, oncologists] = await Promise.all([
       Storage.therapists.list(),
       Storage.settings.get("defaultTherapistId"),
       Storage.records.list(undefined, { includeArchived: true }),
@@ -44,6 +44,7 @@ const SettingsPanel = {
       Storage.photos.stats(),
       Storage.photos.countByOwner(),
       Storage.photoLabels.list(),
+      Storage.oncologists.list(),
     ]);
     const archivedCount = archivedRecords.length;
     const archivedPhotoCount = archivedRecords.reduce(
@@ -84,6 +85,12 @@ const SettingsPanel = {
       </section>
 
       <section class="panel">
+        <h2 class="panel__title">Radiation oncologists</h2>
+        <p class="panel__desc">${oncologists.length} name${oncologists.length === 1 ? "" : "s"} offered for &ldquo;Treating radiation oncologist&rdquo; on the scan checklist.</p>
+        <a href="#/oncologists" class="btn btn--ghost">Edit list</a>
+      </section>
+
+      <section class="panel">
         <h2 class="panel__title">Storage</h2>
         <p class="panel__desc">
           ${records.length} completed sheet${records.length === 1 ? "" : "s"} stored on this iPad &middot; ${archivedCount} archived
@@ -106,7 +113,7 @@ const SettingsPanel = {
         </div>
       </section>
 
-      <p class="page-sub" style="margin-top:24px">Setup Sheets PWA &middot; v4</p>
+      <p class="page-sub" style="margin-top:24px">Setup Sheets PWA &middot; v5</p>
     `;
 
     this._bind();

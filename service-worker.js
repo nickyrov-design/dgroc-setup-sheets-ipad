@@ -1,7 +1,7 @@
 /* Setup Sheets PWA — offline cache.
    Bump CACHE_VERSION on any code/template change so installed clients pick it up. */
 
-const CACHE_VERSION = "v7";
+const CACHE_VERSION = "v8";
 const CACHE_NAME = `setup-sheets-${CACHE_VERSION}`;
 
 const PRECACHE = [
@@ -12,6 +12,7 @@ const PRECACHE = [
   "./vendor/pdf-lib.min.js",
   "./assets/icons/logo.png",
   "./assets/icons/logo_notext.png",
+  "./assets/letterhead.jpg",
   "./assets/templates/extremity_template.pdf",
   "./assets/templates/head_and_neck_template.pdf",
   "./assets/templates/omniboard_template.pdf",
@@ -21,7 +22,9 @@ const PRECACHE = [
   "./scripts/share.js",
   "./scripts/draft.js",
   "./scripts/therapistsPanel.js",
+  "./scripts/listEditorPanel.js",
   "./scripts/photoLabelsPanel.js",
+  "./scripts/oncologistsPanel.js",
   "./scripts/settingsPanel.js",
   "./scripts/photos.js",
   "./scripts/photoGallery.js",
@@ -29,6 +32,10 @@ const PRECACHE = [
   "./scripts/exportFiles.js",
   "./scripts/setupSheetLanding.js",
   "./scripts/setupSheetForm.js",
+  "./scripts/scanChecklists.js",
+  "./scripts/checklistState.js",
+  "./scripts/checklistSection.js",
+  "./scripts/checklistPdf.js",
   "./scripts/setupSheetHistory.js",
   "./scripts/setupSheetConfigs/index.js",
   "./scripts/setupSheetConfigs/extremityConfig.js",

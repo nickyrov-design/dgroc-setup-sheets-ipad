@@ -16,6 +16,11 @@
  * Photos (photoGallery.js) are saved as soon as they're added, in every mode.
  * A draft's photos count as unsaved work and move onto the record when the
  * sheet is completed.
+ *
+ * Scan checklist (checklistSection.js): a second tab, on by default for every
+ * new sheet. Its state travels with the draft / record as `checklist`, and it
+ * is printed on its own page(s) after the set-up sheet (checklistPdf.js).
+ * Sheets completed before checklists existed have no `checklist` and no tab.
  */
 
 import Router from "./router.js";
@@ -24,6 +29,12 @@ import Storage from "./storage.js";
 import { readDraft, writeDraft, clearDraft, draftHasData } from "./draft.js";
 import { mountPhotoGallery } from "./photoGallery.js";
 import { buildExportBaseName, exportSheet } from "./exportFiles.js";
+import { mountChecklist, confirmIncompleteChecklist } from "./checklistSection.js";
+import {
+  newChecklistState, readChecklistState, checklistModel, checklistProgress,
+  checklistIssues, toRecordChecklist, checklistFingerprint,
+} from "./checklistState.js";
+import { appendChecklistPages } from "./checklistPdf.js";
 
 const NA = "N/A";
 
@@ -117,6 +128,9 @@ const SetupSheetForm = {
   _record: null,
   _gallery: null,
   _photoCount: 0,
+  _checklist: null,     /* checklist state (edited in place), null = no checklist */
+  _checklistUi: null,
+  _tab: "sheet",        /* "sheet" | "checklist" */
 
   async mountNew(container, sheetId) {
     this._container = container;
@@ -126,12 +140,38 @@ const SetupSheetForm = {
       container.innerHTML = `<div class="page-error">Unknown sheet type: ${escapeHtml(sheetId)}</div>`;
       return;
     }
+    const hash = location.hash;
     this._config = config;
     this._mode = "new";
     this._record = null;
+    this._tab = "sheet";
     const draft = readDraft(sheetId);
-    this._render(draft?.data || {});
+    const data = draft?.data || {};
+    const checklist = await this._draftChecklist(sheetId, data);
+    /* The user moved on while the draft's photos were being counted. */
+    if (location.hash !== hash) return;
+    this._checklist = checklist;
+    this._render(data);
     this._bind();
+    if (this._checklist.enabled && !this._checklist.siteId) {
+      this._checklistUi?.openSitePicker({ first: true });
+    }
+  },
+
+  /* The draft's checklist, or a fresh one. A site picked on a sheet that has
+     nothing else on it belongs to an abandoned start, not to the next
+     patient, so the site picker asks again. */
+  async _draftChecklist(sheetId, data) {
+    const saved = readChecklistState(data.checklist);
+    if (!saved) return newChecklistState();
+    if (draftHasData(data, this._config)) return saved;
+    let photos = 0;
+    try {
+      photos = (await Storage.photos.countByOwner()).get(Storage.photos.owner.draft(sheetId)) || 0;
+    } catch (err) {
+      console.error(err);
+    }
+    return photos > 0 ? saved : newChecklistState();
   },
 
   async mountExisting(container, sheetId, recordId) {
@@ -151,6 +191,8 @@ const SetupSheetForm = {
     this._config = config;
     this._mode = "view";
     this._record = record;
+    this._tab = "sheet";
+    this._checklist = readChecklistState(record.checklist);
     this._render(record);
     this._bind();
   },
@@ -166,7 +208,19 @@ const SetupSheetForm = {
       else if (f.type === "dropdown") data[f.id] = el.value || NA;
       else data[f.id] = el.value;
     }
+    if (this._checklist) data.checklist = JSON.parse(JSON.stringify(this._checklist));
     return data;
+  },
+
+  /* The set-up sheet values the checklist's patient and scan details use. */
+  _sheetValues() {
+    const val = (id) => document.getElementById(`ss-${id}`)?.value || "";
+    return {
+      patientName: val("patientName"),
+      patientId: val("patientId"),
+      scanDate: val("scanDate"),
+      radiotherapist: val("radiotherapist"),
+    };
   },
 
   _saveDraft() {
@@ -205,7 +259,8 @@ const SetupSheetForm = {
           return true;
         }
       }
-      return false;
+      return checklistFingerprint(this._checklist)
+        !== checklistFingerprint(readChecklistState(this._record.checklist));
     }
     return false;
   },
@@ -247,6 +302,75 @@ const SetupSheetForm = {
         if (exportBtn) exportBtn.textContent = count > 0 ? "Export…" : "Export PDF…";
       },
     });
+  },
+
+  /* Mounts the Scan checklist tab's content, if this sheet has a checklist. */
+  _mountChecklist() {
+    if (this._checklistUi) this._checklistUi.unmount();
+    this._checklistUi = null;
+    const host = document.getElementById("ss-checklist");
+    if (!host || !this._checklist) return;
+    this._checklistUi = mountChecklist(host, {
+      state: this._checklist,
+      readOnly: this._mode === "view",
+      getSheet: () => this._sheetValues(),
+      onChange: () => {
+        this._saveDraft();
+        this._syncChecklistBadge();
+      },
+    });
+  },
+
+  /* "12/35", "Choose site" or "Off", shown on the Scan checklist tab. */
+  _checklistBadge() {
+    const s = this._checklist;
+    if (!s) return { text: "", complete: false };
+    if (!s.enabled) return { text: "Off", complete: false };
+    const model = checklistModel(s);
+    if (!model.site) return { text: "Choose site", complete: false };
+    const { answered, total } = checklistProgress(s, model);
+    return { text: `${answered}/${total}`, complete: answered === total };
+  },
+
+  _syncChecklistBadge() {
+    const el = document.getElementById("ss-checklist-badge");
+    if (!el) return;
+    const { text, complete } = this._checklistBadge();
+    el.textContent = text;
+    el.classList.toggle("is-complete", complete);
+  },
+
+  /* Shows a tab and scrolls to its top — or, with `firstOpen`, to the
+     checklist's first unanswered item (after the "not finished" warning). */
+  _showTab(tab, { firstOpen = false } = {}) {
+    const panel = document.getElementById(`ss-panel-${tab}`);
+    if (!panel) return;
+    const switching = this._tab !== tab || panel.hidden;
+    this._tab = tab;
+    for (const t of ["sheet", "checklist"]) {
+      const p = document.getElementById(`ss-panel-${t}`);
+      if (p) p.hidden = t !== tab;
+      const btn = document.getElementById(`ss-tab-${t}`);
+      if (btn) btn.setAttribute("aria-selected", String(t === tab));
+    }
+    if (firstOpen) {
+      const open = panel.querySelector("[data-item]:not(.is-done):not(.is-na)")
+        || panel.querySelector(".checklist-choose")
+        || panel;
+      this._scrollBelowBars(open);
+    } else if (switching) {
+      this._scrollBelowBars(panel, { upOnly: true });
+    }
+  },
+
+  /* Scrolls so `el` sits just below the sticky header and tab bar. With
+     `upOnly`, only if it is above that point (so the page never jumps down). */
+  _scrollBelowBars(el, { upOnly = false } = {}) {
+    const header = document.querySelector(".app-header");
+    const tabs = document.querySelector(".ss-tabs");
+    const offset = (header?.offsetHeight || 0) + (tabs?.offsetHeight || 0) + 12;
+    const top = Math.max(0, el.getBoundingClientRect().top + window.scrollY - offset);
+    if (!upOnly || window.scrollY > top) window.scrollTo({ top });
   },
 
   /* Register (new/edit) or drop (view) the navigation guard for this screen. */
@@ -313,6 +437,7 @@ const SetupSheetForm = {
 
   _render(d) {
     if (this._gallery) { this._gallery.unmount(); this._gallery = null; }
+    if (this._checklistUi) { this._checklistUi.unmount(); this._checklistUi = null; }
     const readOnly = this._mode === "view";
     const header = this._renderHeader(d);
 
@@ -332,10 +457,30 @@ const SetupSheetForm = {
       </section>
     `).join("");
 
+    /* Sheets with a checklist get two tabs; older sheets keep the single page. */
+    const hasChecklist = !!this._checklist;
+    const tab = hasChecklist ? this._tab : "sheet";
+    const badge = this._checklistBadge();
+    const tabsHtml = !hasChecklist ? "" : `
+      <div class="ss-tabs" role="tablist" aria-label="Sheet sections">
+        <button type="button" role="tab" class="ss-tab" id="ss-tab-sheet" data-tab="sheet" aria-controls="ss-panel-sheet" aria-selected="${tab === "sheet"}">Set-up sheet</button>
+        <button type="button" role="tab" class="ss-tab" id="ss-tab-checklist" data-tab="checklist" aria-controls="ss-panel-checklist" aria-selected="${tab === "checklist"}">
+          Scan checklist
+          <span class="ss-tab__badge${badge.complete ? " is-complete" : ""}" id="ss-checklist-badge">${escapeHtml(badge.text)}</span>
+        </button>
+      </div>`;
+
     this._container.innerHTML = `
       ${header}
       <form class="setup-sheet" id="setup-sheet-form" autocomplete="off" ${readOnly ? "data-readonly" : ""}>
-        ${sectionsHtml}
+        ${tabsHtml}
+        <div class="ss-panel" id="ss-panel-sheet" role="tabpanel" aria-labelledby="ss-tab-sheet"${tab === "sheet" ? "" : " hidden"}>
+          ${sectionsHtml}
+        </div>
+        ${hasChecklist ? `
+          <div class="ss-panel" id="ss-panel-checklist" role="tabpanel" aria-labelledby="ss-tab-checklist"${tab === "checklist" ? "" : " hidden"}>
+            <div id="ss-checklist"></div>
+          </div>` : ""}
         <section class="setup-sheet__section photo-section" id="ss-photos" aria-label="Photos"></section>
         <div class="setup-sheet__footer">${this._renderFooter()}</div>
         <div class="setup-sheet__error" id="setup-sheet-error"></div>
@@ -458,8 +603,12 @@ const SetupSheetForm = {
     const form = document.getElementById("setup-sheet-form");
     if (!form) { this._installGuard(); this._syncHeaderSave(); return; }
 
-    form.addEventListener("change", () => this._saveDraft());
-    form.addEventListener("input", () => this._saveDraft());
+    form.addEventListener("change", () => { this._saveDraft(); this._checklistUi?.refreshMirrors(); });
+    form.addEventListener("input", () => { this._saveDraft(); this._checklistUi?.refreshMirrors(); });
+
+    form.querySelectorAll("[data-tab]").forEach((btn) => {
+      btn.addEventListener("click", () => this._showTab(btn.dataset.tab));
+    });
 
     const clearBtn = document.getElementById("ss-clear-btn");
     if (clearBtn) {
@@ -490,6 +639,7 @@ const SetupSheetForm = {
     if (editBtn) {
       editBtn.addEventListener("click", () => {
         this._mode = "edit";
+        this._checklist = readChecklistState(this._record.checklist);
         this._render(this._record);
         this._bind();
       });
@@ -500,6 +650,7 @@ const SetupSheetForm = {
       cancelEditBtn.addEventListener("click", () => {
         if (this._isDirty() && !confirm("Discard your changes to this sheet?")) return;
         this._mode = "view";
+        this._checklist = readChecklistState(this._record.checklist);
         this._render(this._record);
         this._bind();
       });
@@ -510,9 +661,11 @@ const SetupSheetForm = {
       exportBtn.addEventListener("click", () => exportSheet(this._config, this._record));
     }
 
+    this._mountChecklist();
     this._mountPhotos();
     this._installGuard();
     this._syncHeaderSave();
+    syncHeaderHeight();
   },
 
   /* ---- Complete / Save ---- */
@@ -525,6 +678,18 @@ const SetupSheetForm = {
   async _saveSheet(destinationHash) {
     const errorEl = document.getElementById("setup-sheet-error");
     if (errorEl) errorEl.textContent = "";
+
+    /* Warn (don't block) when the scan checklist isn't finished. */
+    if (this._checklist?.enabled) {
+      const issues = checklistIssues(this._checklist, this._sheetValues());
+      if (issues.length) {
+        const choice = await confirmIncompleteChecklist(issues, { isEdit: this._mode === "edit" });
+        if (choice !== "anyway") {
+          this._showTab("checklist", { firstOpen: true });
+          return false;
+        }
+      }
+    }
 
     const signer = await pickTherapist({
       title: this._mode === "edit" ? "Save changes" : "Complete set-up sheet",
@@ -543,22 +708,30 @@ const SetupSheetForm = {
          filed with the sheet rather than left on the draft. */
       if (this._gallery) await this._gallery.whenIdle();
       const data = this._readDOM();
+      /* Filed with a copy of its wording, so later wording changes never alter it. */
+      if (this._checklist) data.checklist = toRecordChecklist(this._checklist);
 
       let result;
       if (this._mode === "edit" && this._record) {
-        const pdfBytes = await this._fillPdf(data);
+        const editedAt = new Date().toISOString();
+        const pdfBytes = await this._fillPdf(data, {
+          completedBy: this._record.completedBy,
+          completedAt: this._record.completedAt,
+          editedBy: signer.name,
+          editedAt,
+        });
         const blob = new Blob([pdfBytes], { type: "application/pdf" });
         result = await Storage.records.update(
           this._record.id,
           data,
           blob,
-          { name: signer.name, userId: signer.userId, at: new Date().toISOString() },
+          { name: signer.name, userId: signer.userId, at: editedAt },
         );
       } else {
         data.completedBy = signer.name;
         data.completedByUserId = signer.userId;
         data.completedAt = new Date().toISOString();
-        const pdfBytes = await this._fillPdf(data);
+        const pdfBytes = await this._fillPdf(data, { completedBy: data.completedBy, completedAt: data.completedAt });
         const blob = new Blob([pdfBytes], { type: "application/pdf" });
         result = await Storage.records.save(this._config.id, data, blob);
       }
@@ -581,9 +754,12 @@ const SetupSheetForm = {
     }
   },
 
-  /* ---- PDF generation (verbatim from desktop, except template fetch) ---- */
+  /* ---- PDF generation (verbatim from desktop, except template fetch and the
+     scan checklist page(s) appended at the end) ----
+     `meta` = { completedBy, completedAt, editedBy?, editedAt? } for the
+     checklist page footer. */
 
-  async _fillPdf(data) {
+  async _fillPdf(data, meta = {}) {
     const { PDFDocument, rgb, StandardFonts } = window.PDFLib;
     const templateUrl = `./assets/templates/${this._config.template}`;
     const templateBuf = await fetch(templateUrl).then((r) => r.arrayBuffer());
@@ -644,6 +820,10 @@ const SetupSheetForm = {
       }
     }
 
+    if (data.checklist?.enabled) {
+      await appendChecklistPages(pdfDoc, { checklist: data.checklist, sheet: data, meta });
+    }
+
     return pdfDoc.save();
   },
 };
@@ -652,6 +832,14 @@ const SetupSheetForm = {
    iOS fires these when the app is hidden (home button / app switcher) or torn
    down. Flushing the "new" draft here guarantees an accidental exit never loses
    entered data, even if the last keystroke's input event was missed. */
+
+/* The sheet's tab bar sticks just below the header, whose height depends on
+   the iPad's status bar and on the header Save button. */
+function syncHeaderHeight() {
+  const header = document.querySelector(".app-header");
+  if (header) document.documentElement.style.setProperty("--app-header-h", `${header.offsetHeight}px`);
+}
+window.addEventListener("resize", syncHeaderHeight);
 
 function flushDraftOnHide() {
   if (SetupSheetForm._mode === "new") SetupSheetForm._saveDraft();

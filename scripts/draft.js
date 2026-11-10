@@ -5,10 +5,13 @@
  * localStorage per sheet id so an unfinished sheet survives an accidental
  * navigation, an app close (home button), or a reload.
  *
- * Stored shape:  { savedAt: "<iso>", data: { <fieldId>: value, ... } }
+ * Stored shape:  { savedAt: "<iso>", data: { <fieldId>: value, ..., checklist } }
+ * `checklist` is the scan checklist state (see checklistState.js).
  * Legacy drafts (a bare data object, no wrapper) are still read so sheets
  * started before this update are not orphaned.
  */
+
+import { checklistHasData } from "./checklistState.js";
 
 const NA = "N/A";
 
@@ -54,11 +57,13 @@ export function clearDraft(sheetId) {
 /**
  * True if the draft holds at least one user-entered value — a ticked checkbox,
  * a chosen dropdown (anything other than N/A), or a non-empty text/date/weight
- * field. A pristine form (all defaults) is NOT a recoverable draft, so it never
+ * field — or a scan checklist answer or detail. A pristine form (all defaults,
+ * even with a checklist site picked) is NOT a recoverable draft, so it never
  * triggers a "save before leaving" prompt or a resume banner.
  */
 export function draftHasData(data, config) {
   if (!data || !config) return false;
+  if (checklistHasData(data.checklist)) return true;
   for (const f of config.fields) {
     const v = data[f.id];
     if (v == null) continue;

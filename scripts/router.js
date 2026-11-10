@@ -8,6 +8,7 @@
  *   #/settings                    -> settings screen
  *   #/therapists                  -> therapist list editor
  *   #/photo-labels                -> photo label list editor
+ *   #/oncologists                 -> radiation oncologist list editor
  */
 
 const routes = [];

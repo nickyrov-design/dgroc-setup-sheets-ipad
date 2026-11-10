@@ -83,7 +83,7 @@ function openExportDialog(record, baseName, photos, blobs) {
         <label class="export-option">
           <input type="checkbox" id="export-pdf"${hasPdf ? " checked" : " disabled"} />
           <span class="export-option__text">
-            <span class="export-option__title">Set-up sheet PDF</span>
+            <span class="export-option__title">${record.checklist?.enabled ? "Set-up sheet + scan checklist PDF" : "Set-up sheet PDF"}</span>
             <span class="export-option__sub">${hasPdf ? escapeHtml(pdfName) : "PDF data is missing for this record."}</span>
           </span>
         </label>

@@ -1,13 +1,14 @@
 /**
- * IndexedDB wrapper. Seven stores: records, pdfs, therapists, settings, photos,
- * photoBlobs, photoLabels.
+ * IndexedDB wrapper. Eight stores: records, pdfs, therapists, settings, photos,
+ * photoBlobs, photoLabels, oncologists.
  *
  * Rows that get rewritten hold no Blobs: iOS Safari often fails to store a
  * Blob that was read back out of IndexedDB ("Error preparing Blob/File data to
  * be stored in object store", WebKit bugs 235687 / 240216).
  *
  * records:     keyed by id ("YYYYMMDD-HHMMSS-xxxx") — matches desktop format.
- *              Each row holds the form JSON. Rewritten when archiving.
+ *              Each row holds the form JSON, including the scan checklist
+ *              (`checklist`, see checklistState.js). Rewritten when archiving.
  * pdfs:        keyed by record id. The rendered PDF as a Blob, kept out of
  *              `records` so archiving never rewrites it. Only ever written
  *              with a freshly made PDF.
@@ -22,15 +23,20 @@
  *              `photos` so listing, labelling and re-homing photos never
  *              rewrites image data.
  * photoLabels: keyed by uuid. Editable quick-pick labels for photos, in `order`.
+ * oncologists: keyed by uuid. Editable list of treating radiation oncologists
+ *              offered on the scan checklist, in `order`.
  */
 
 const DB_NAME = "dgroc-setup-sheets";
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 /* Seeded when the photoLabels store is created; editable in Settings. */
 const DEFAULT_PHOTO_LABELS = [
-  "Anterior", "Left lateral", "Right lateral", "Superior", "Inferior", "Tattoos", "Immobilisation",
+  "Anterior", "Left lateral", "Right lateral", "Superior", "Inferior", "Tattoos", "Immobilisation", "Bolus",
 ];
+
+/* Seeded when the oncologists store is created; editable in Settings. */
+const DEFAULT_ONCOLOGISTS = ["Dr Kotzen", "Dr Hugo", "Dr Tunmer", "Dr Chetty", "Dr Mutsoane"];
 
 let _dbPromise = null;
 
@@ -81,6 +87,23 @@ function openDb() {
       /* v3 -> v4: PDFs get their own store (existing ones moved by moveLegacyPdfs). */
       if (!db.objectStoreNames.contains("pdfs")) {
         db.createObjectStore("pdfs", { keyPath: "id" });
+      }
+      /* v4 -> v5: radiation oncologist list for the scan checklist. */
+      if (!db.objectStoreNames.contains("oncologists")) {
+        const oncologists = db.createObjectStore("oncologists", { keyPath: "id" });
+        DEFAULT_ONCOLOGISTS.forEach((name, order) => oncologists.add({ id: uuid(), name, order }));
+      }
+      /* v4 -> v5: a "Bolus" photo label on iPads whose label list predates it
+         (new lists already have it), unless one is there already. */
+      if (e.oldVersion >= 3 && e.oldVersion < 5 && txn) {
+        const labels = txn.objectStore("photoLabels");
+        const all = labels.getAll();
+        all.onsuccess = () => {
+          const rows = all.result || [];
+          if (rows.some((l) => String(l.name || "").trim().toLowerCase() === "bolus")) return;
+          const order = rows.reduce((max, l) => Math.max(max, l.order ?? 0), -1) + 1;
+          labels.add({ id: uuid(), name: "Bolus", order });
+        };
       }
     };
     req.onsuccess = () => {
@@ -297,6 +320,8 @@ async function listRecords(sheetId, opts = {}) {
       editCount: Array.isArray(r.editHistory) ? r.editHistory.length : 0,
       archived: !!r.archived,
       archivedAt: r.archivedAt || "",
+      /* "Pelvis", "Not chosen", "No checklist", or "" for sheets from before checklists. */
+      checklistSite: !r.checklist ? "" : r.checklist.enabled === false ? "No checklist" : (r.checklist.siteLabel || "Not chosen"),
     }));
   out.sort((a, b) =>
     (b.updatedAt || b.completedAt || "").localeCompare(a.updatedAt || a.completedAt || "")
@@ -490,56 +515,65 @@ async function photoStats() {
   return { count: rows.length, bytes };
 }
 
-/* ---- photo labels ---- */
+/* ---- ordered name lists (photo labels, radiation oncologists) ---- */
 
-async function listPhotoLabels() {
-  const store = await tx("photoLabels");
-  const all = await reqAsPromise(store.getAll());
-  all.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-  return all;
-}
-
-async function addPhotoLabel(name) {
-  const trimmed = String(name || "").trim();
-  if (!trimmed) return { ok: false, error: "Label required." };
-  const all = await listPhotoLabels();
-  if (all.some((l) => l.name.toLowerCase() === trimmed.toLowerCase())) {
-    return { ok: false, error: "That label is already in the list." };
+/* list / add / rename / remove / move for a store of { id, name, order }.
+   `noun` names an entry in error messages ("Label required."). */
+function orderedList(storeName, noun) {
+  async function list() {
+    const store = await tx(storeName);
+    const all = await reqAsPromise(store.getAll());
+    all.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    return all;
   }
-  const order = all.length ? (all[all.length - 1].order ?? all.length - 1) + 1 : 0;
-  const store = await tx("photoLabels", "readwrite");
-  const id = uuid();
-  await reqAsPromise(store.add({ id, name: trimmed, order }));
-  return { ok: true, id };
+
+  async function add(name) {
+    const trimmed = String(name || "").trim();
+    if (!trimmed) return { ok: false, error: `${noun} required.` };
+    const all = await list();
+    if (all.some((l) => l.name.toLowerCase() === trimmed.toLowerCase())) {
+      return { ok: false, error: `That ${noun.toLowerCase()} is already in the list.` };
+    }
+    const order = all.length ? (all[all.length - 1].order ?? all.length - 1) + 1 : 0;
+    const store = await tx(storeName, "readwrite");
+    const id = uuid();
+    await reqAsPromise(store.add({ id, name: trimmed, order }));
+    return { ok: true, id };
+  }
+
+  async function rename(id, name) {
+    const trimmed = String(name || "").trim();
+    if (!trimmed) return { ok: false, error: `${noun} required.` };
+    const store = await tx(storeName, "readwrite");
+    const cur = await reqAsPromise(store.get(id));
+    if (!cur) return { ok: false, error: `${noun} not found.` };
+    await reqAsPromise(store.put({ ...cur, name: trimmed }));
+    return { ok: true };
+  }
+
+  async function remove(id) {
+    const store = await tx(storeName, "readwrite");
+    await reqAsPromise(store.delete(id));
+    return { ok: true };
+  }
+
+  /* Swaps an entry with its neighbour (delta -1 = up, +1 = down) and renumbers the list. */
+  async function move(id, delta) {
+    const all = await list();
+    const i = all.findIndex((l) => l.id === id);
+    const j = i + delta;
+    if (i < 0 || j < 0 || j >= all.length) return { ok: false, error: `${noun} can't move further.` };
+    [all[i], all[j]] = [all[j], all[i]];
+    const store = await tx(storeName, "readwrite");
+    await Promise.all(all.map((l, order) => reqAsPromise(store.put({ ...l, order }))));
+    return { ok: true };
+  }
+
+  return { list, add, rename, remove, move };
 }
 
-async function renamePhotoLabel(id, name) {
-  const trimmed = String(name || "").trim();
-  if (!trimmed) return { ok: false, error: "Label required." };
-  const store = await tx("photoLabels", "readwrite");
-  const cur = await reqAsPromise(store.get(id));
-  if (!cur) return { ok: false, error: "Label not found." };
-  await reqAsPromise(store.put({ ...cur, name: trimmed }));
-  return { ok: true };
-}
-
-async function removePhotoLabel(id) {
-  const store = await tx("photoLabels", "readwrite");
-  await reqAsPromise(store.delete(id));
-  return { ok: true };
-}
-
-/* Swaps a label with its neighbour (delta -1 = up, +1 = down) and renumbers the list. */
-async function movePhotoLabel(id, delta) {
-  const all = await listPhotoLabels();
-  const i = all.findIndex((l) => l.id === id);
-  const j = i + delta;
-  if (i < 0 || j < 0 || j >= all.length) return { ok: false, error: "Label can't move further." };
-  [all[i], all[j]] = [all[j], all[i]];
-  const store = await tx("photoLabels", "readwrite");
-  await Promise.all(all.map((l, order) => reqAsPromise(store.put({ ...l, order }))));
-  return { ok: true };
-}
+const photoLabels = orderedList("photoLabels", "Label");
+const oncologists = orderedList("oncologists", "Name");
 
 /* ---- therapists ---- */
 
@@ -616,13 +650,8 @@ export default {
     countByOwner: countPhotosByOwner,
     stats: photoStats,
   },
-  photoLabels: {
-    list: listPhotoLabels,
-    add: addPhotoLabel,
-    rename: renamePhotoLabel,
-    remove: removePhotoLabel,
-    move: movePhotoLabel,
-  },
+  photoLabels,
+  oncologists,
   therapists: { list: listTherapists, add: addTherapist, rename: renameTherapist, remove: removeTherapist },
   settings: { get: getSetting, set: setSetting },
   generateId,

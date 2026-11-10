@@ -1,8 +1,9 @@
 /**
  * History list. Filter chips by sheet type; tap a row to open in view mode.
  * Toggle to show archived records, per-row archive/unarchive, and a
- * name/patient-id search box. Rows show how many photos a sheet has; Export
- * offers the PDF and the photos together.
+ * name / patient-id / scan-checklist-site search box. Rows show the checklist
+ * site and how many photos a sheet has; Export offers the PDF and the photos
+ * together.
  */
 
 import SETUP_SHEET_CONFIGS, { SETUP_SHEET_ORDER } from "./setupSheetConfigs/index.js";
@@ -28,7 +29,8 @@ function matchesSearch(r, q) {
   const needle = q.toLowerCase();
   return (
     (r.patientName || "").toLowerCase().includes(needle) ||
-    (r.patientId || "").toLowerCase().includes(needle)
+    (r.patientId || "").toLowerCase().includes(needle) ||
+    (r.checklistSite || "").toLowerCase().includes(needle)
   );
 }
 
@@ -37,13 +39,17 @@ function rowHtml(r, photoCount) {
   const stamp = formatTimestamp(r.updatedAt || r.completedAt);
   const editTag = r.editCount > 0 ? ` &middot; ${r.editCount} edit${r.editCount > 1 ? "s" : ""}` : "";
   const photoTag = photoCount > 0 ? ` &middot; ${photoCount} photo${photoCount > 1 ? "s" : ""}` : "";
+  /* Scan checklist site; nothing for sheets from before checklists. */
+  const siteTag = !r.checklistSite ? ""
+    : r.checklistSite === "No checklist" ? " &middot; No checklist"
+    : ` &middot; Site: ${escapeHtml(r.checklistSite)}`;
   const archivedTag = r.archived ? `<span class="history-row__tag">Archived</span>` : "";
   const archiveBtnLabel = r.archived ? "Unarchive" : "Archive";
   return `
     <a class="history-row${r.archived ? " is-archived" : ""}" href="#/form/${encodeURIComponent(r.sheetId)}/${encodeURIComponent(r.id)}" data-record-id="${escapeHtml(r.id)}">
       <div>
         <div class="history-row__primary">${escapeHtml(r.patientName || "(no patient name)")}${archivedTag}</div>
-        <div class="history-row__sub">${escapeHtml(cfg?.label || r.sheetId)}${r.patientId ? ` &middot; ${escapeHtml(r.patientId)}` : ""}${photoTag}</div>
+        <div class="history-row__sub">${escapeHtml(cfg?.label || r.sheetId)}${siteTag}${r.patientId ? ` &middot; ${escapeHtml(r.patientId)}` : ""}${photoTag}</div>
       </div>
       <div>
         <div class="history-row__sub">${escapeHtml(r.linac || "")}${r.radiotherapist ? ` &middot; ${escapeHtml(r.radiotherapist)}` : ""}</div>
@@ -114,7 +120,7 @@ const SetupSheetHistory = {
           type="search"
           inputmode="search"
           autocomplete="off"
-          placeholder="Search name or patient ID"
+          placeholder="Search name, patient ID or site"
           value="${escapeHtml(this._search)}"
         />
         <label class="history-toggle">

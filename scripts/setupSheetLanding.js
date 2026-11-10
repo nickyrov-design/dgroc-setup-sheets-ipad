@@ -7,6 +7,7 @@
 import SETUP_SHEET_CONFIGS, { SETUP_SHEET_ORDER } from "./setupSheetConfigs/index.js";
 import Storage from "./storage.js";
 import { readDraft, clearDraft, draftHasData } from "./draft.js";
+import { readChecklistState, siteLabel } from "./checklistState.js";
 
 function escapeHtml(s) {
   return String(s ?? "")
@@ -46,7 +47,9 @@ const SetupSheetLanding = {
         const photoCount = photoCounts.get(Storage.photos.owner.draft(id)) || 0;
         const hasEntries = !!draft && draftHasData(draft.data, cfg);
         if (!hasEntries && photoCount === 0) return null;
-        return { id, cfg, savedAt: draft?.savedAt || null, photoCount };
+        const checklist = readChecklistState(draft?.data?.checklist);
+        const site = checklist?.enabled ? siteLabel(checklist) : "";
+        return { id, cfg, site, savedAt: draft?.savedAt || null, photoCount };
       })
       .filter(Boolean);
 
@@ -73,7 +76,7 @@ const SetupSheetLanding = {
             return `
             <li class="resume-item">
               <div class="resume-item__info">
-                <span class="resume-item__label">${escapeHtml(u.cfg.label)}</span>
+                <span class="resume-item__label">${escapeHtml(u.cfg.label)}${u.site ? ` &middot; ${escapeHtml(u.site)}` : ""}</span>
                 ${details ? `<span class="resume-item__when">${details}</span>` : ""}
               </div>
               <div class="resume-item__actions">
