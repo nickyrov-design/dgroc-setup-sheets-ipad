@@ -72,52 +72,104 @@ function confirmTurnOff() {
   });
 }
 
+const SELECTED_ICON = `<svg class="site-option__check" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>`;
+
 /**
- * Asks which site is being scanned. Resolves { siteId, side }, "none" (turn
- * the checklist off, already confirmed), or null (choose later / cancel).
+ * Asks which site is being scanned. Tapping a site (or Breast's Left / Right)
+ * only selects it; Confirm uses the selection, so a mis-tap is easy to undo.
+ * Opens with the sheet's current site selected, if it has one.
+ * Resolves { siteId, side }, "none" (turn the checklist off, already
+ * confirmed), or null (choose later / cancel).
  */
 export function pickChecklistSite({ siteId = null, side = null, first = false } = {}) {
   return new Promise((resolve) => {
+    const current = CHECKLIST_SITES.find((s) => s.id === siteId);
+    let selected = current && (!current.sided || side) ? { siteId, side: current.sided ? side : null } : null;
+
     const options = CHECKLIST_SITES.map((s) => {
-      const active = s.id === siteId;
       const sub = s.subtitle ? `<span class="site-option__sub">${escapeHtml(s.subtitle)}</span>` : "";
       if (s.sided) {
         return `
-          <div class="site-option site-option--sided${active ? " is-active" : ""}">
+          <div class="site-option site-option--sided" data-site-card="${escapeHtml(s.id)}">
             <span class="site-option__name">${escapeHtml(s.name)}</span>
             ${sub}
             <span class="site-option__sides">
               ${SITE_SIDES.map((sd) => `
-                <button type="button" class="btn btn--sm${active && side === sd ? " btn--primary" : " btn--ghost"}" data-site="${escapeHtml(s.id)}" data-side="${escapeHtml(sd)}">${escapeHtml(sd)}</button>
+                <button type="button" class="btn btn--sm btn--ghost site-option__side" data-site="${escapeHtml(s.id)}" data-side="${escapeHtml(sd)}" aria-pressed="false">${escapeHtml(sd)}</button>
               `).join("")}
             </span>
+            ${SELECTED_ICON}
           </div>`;
       }
       return `
-        <button type="button" class="site-option${active ? " is-active" : ""}" data-site="${escapeHtml(s.id)}">
+        <button type="button" class="site-option" data-site="${escapeHtml(s.id)}" data-site-card="${escapeHtml(s.id)}" aria-pressed="false">
           <span class="site-option__name">${escapeHtml(s.name)}</span>
           ${sub}
+          ${SELECTED_ICON}
         </button>`;
     }).join("");
 
     const overlay = openOverlay(`
       <div class="dialog dialog--wide" role="dialog" aria-modal="true" aria-labelledby="site-picker-title">
         <h3 class="dialog__title" id="site-picker-title">Which site are you scanning?</h3>
-        <p class="dialog__desc">Its scan checklist is added to this sheet and printed on a Scan Checklist page after the set-up sheet in the PDF.</p>
+        <p class="dialog__desc">Tap a site to select it, then tap <strong>Confirm</strong>. Its scan checklist is added to this sheet and printed on a Scan Checklist page after the set-up sheet in the PDF.</p>
         <div class="site-grid">${options}</div>
+        <p class="site-picker__selected" aria-live="polite"></p>
         <div class="dialog__actions dialog__actions--spread">
           <button type="button" class="btn btn--ghost" data-act="none">No checklist for this sheet</button>
-          <button type="button" class="btn btn--ghost" data-act="cancel">${first ? "Choose later" : "Cancel"}</button>
+          <span class="dialog__actions-group">
+            <button type="button" class="btn btn--ghost" data-act="cancel">${first ? "Choose later" : "Cancel"}</button>
+            <button type="button" class="btn btn--primary" data-act="confirm">Confirm</button>
+          </span>
         </div>
       </div>
     `);
 
+    const summary = overlay.querySelector(".site-picker__selected");
+    const confirmBtn = overlay.querySelector('[data-act="confirm"]');
+
+    /* Highlights the selection and shows it above the buttons. */
+    function sync() {
+      overlay.querySelectorAll("[data-site-card]").forEach((card) => {
+        const on = !!selected && selected.siteId === card.dataset.siteCard;
+        card.classList.toggle("is-selected", on);
+        if (card.matches("button")) card.setAttribute("aria-pressed", String(on));
+      });
+      overlay.querySelectorAll(".site-option__side").forEach((b) => {
+        const on = !!selected && selected.siteId === b.dataset.site && selected.side === b.dataset.side;
+        b.classList.toggle("btn--primary", on);
+        b.classList.toggle("btn--ghost", !on);
+        b.setAttribute("aria-pressed", String(on));
+      });
+      const site = selected && CHECKLIST_SITES.find((s) => s.id === selected.siteId);
+      summary.innerHTML = site
+        ? `Selected: <strong>${escapeHtml(site.sided ? `${site.name} – ${selected.side}` : site.name)}</strong>`
+        : "No site selected yet.";
+      summary.classList.toggle("is-empty", !site);
+      confirmBtn.disabled = !site;
+    }
+    sync();
+
     const done = (value) => { overlay.remove(); resolve(value); };
     overlay.addEventListener("click", async (e) => {
       const btn = e.target.closest("button");
-      if (!btn) return;
+      if (!btn) {
+        /* Tapping Breast's card (not a side) means Breast: clear any other
+           selection and ask for the side. */
+        const card = e.target.closest(".site-option--sided");
+        if (card) {
+          const site = CHECKLIST_SITES.find((s) => s.id === card.dataset.siteCard);
+          if (selected?.siteId !== site.id) selected = null;
+          sync();
+          if (!selected) summary.innerHTML = `Choose <strong>Left</strong> or <strong>Right</strong> for ${escapeHtml(site.name)}.`;
+        }
+        return;
+      }
       if (btn.dataset.site) {
-        done({ siteId: btn.dataset.site, side: btn.dataset.side || null });
+        selected = { siteId: btn.dataset.site, side: btn.dataset.side || null };
+        sync();
+      } else if (btn.dataset.act === "confirm") {
+        if (selected) done(selected);
       } else if (btn.dataset.act === "none") {
         if (await confirmTurnOff()) done("none");
       } else if (btn.dataset.act === "cancel") {

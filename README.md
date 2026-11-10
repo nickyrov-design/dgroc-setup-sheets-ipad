@@ -50,7 +50,7 @@ You can now tap a sheet card on the landing screen and start filling.
 
 Every new sheet has a scan checklist, on by default.
 
-- After you tap a sheet card, **Which site are you scanning?** asks for the site: Breast (Left or Right), Head and neck, Pelvis, SBRT – Pancreas, SBRT – Liver, SBRT – Lung, SBRT – Para-aortic lymph nodes, Cranial SRS, or Other / general (patient details and final checks only). **Choose later** leaves it for now; **No checklist for this sheet** turns it off after an "Are you sure?".
+- After you tap a sheet card, **Which site are you scanning?** asks for the site: Breast (Left or Right), Head and neck, Pelvis, SBRT – Pancreas, SBRT – Liver, SBRT – Lung, SBRT – Para-aortic lymph nodes, Cranial SRS, or Other / general (patient details and final checks only). Tapping a site only selects it (highlighted, with a tick); tap **Confirm** to use it, so a mis-tap is easy to correct. **Choose later** leaves it for now; **No checklist for this sheet** turns it off after an "Are you sure?".
 - The sheet then has two tabs: **Set-up sheet** and **Scan checklist** (with a count such as 12/35). The checklist tab has the on/off switch, the site (**Change site**), the patient and scan details, the site's items with its **Escalate** warning above them, and the final checks.
 - Tap **✓** or **N/A** for each item (tap again to clear). Tapping an item's text ticks it.
 - Patient name / ID, date of planning scan and person performing the scan come from the set-up sheet (Patient name, Patient ID, Scan date, Radiotherapist), so they're only typed once. Pick the treating radiation oncologist and who reviewed the checklist from the lists, and add any outstanding queries or comments.
