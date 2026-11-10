@@ -35,8 +35,17 @@ import {
   checklistIssues, toRecordChecklist, checklistFingerprint,
 } from "./checklistState.js";
 import { appendChecklistPages } from "./checklistPdf.js";
+import { fillListSelects, listSelectValue } from "./nameLists.js";
 
 const NA = "N/A";
+
+/* Text fields shown as a dropdown of an editable name list (with "+ Add
+   new…"). They stay "text" in the configs, which match the desktop tool's,
+   so their values, drafts and PDF output are unchanged. */
+const LIST_FIELDS = {
+  radiotherapist: "therapists",
+  diagnosis: "diagnoses",
+};
 
 function escapeHtml(s) {
   return String(s ?? "")
@@ -79,18 +88,11 @@ function formatDatePdf(iso) {
 
 async function pickTherapist({ title, confirmLabel }) {
   const therapists = await Storage.therapists.list();
-  if (!therapists.length) {
-    alert("No therapists configured. Open Settings → Therapists to add one.");
-    return null;
-  }
   const defaultId = await Storage.settings.get("defaultTherapistId");
+  const initial = therapists.some((t) => t.id === defaultId) ? defaultId : "";
 
   return new Promise((resolve) => {
     const root = document.getElementById("dialog-root");
-    const opts = therapists.map((t) =>
-      `<option value="${escapeHtml(t.id)}"${t.id === defaultId ? " selected" : ""}>${escapeHtml(t.name)}</option>`
-    ).join("");
-
     root.innerHTML = `
       <div class="dialog-backdrop" id="picker-backdrop">
         <div class="dialog" role="dialog" aria-modal="true">
@@ -98,23 +100,32 @@ async function pickTherapist({ title, confirmLabel }) {
           <p class="dialog__desc">Select the therapist completing this sheet.</p>
           <div class="dialog__field">
             <label for="picker-select">Therapist</label>
-            <select id="picker-select">${opts}</select>
+            <select id="picker-select" data-list="therapists" data-list-value="id" data-value="${escapeHtml(initial)}"
+              data-placeholder="${therapists.length ? "Select…" : "None yet — add a name"}"></select>
           </div>
           <div class="dialog__actions">
             <button type="button" class="btn btn--ghost" id="picker-cancel">Cancel</button>
-            <button type="button" class="btn btn--primary" id="picker-ok">${escapeHtml(confirmLabel)}</button>
+            <button type="button" class="btn btn--primary" id="picker-ok" disabled>${escapeHtml(confirmLabel)}</button>
           </div>
         </div>
       </div>
     `;
 
+    const select = document.getElementById("picker-select");
+    const okBtn = document.getElementById("picker-ok");
+    const syncOk = () => { okBtn.disabled = !listSelectValue(select); };
+    select.addEventListener("change", syncOk);
+    fillListSelects(root).then(syncOk);
+
     const cleanup = () => { root.innerHTML = ""; };
     document.getElementById("picker-cancel").addEventListener("click", () => { cleanup(); resolve(null); });
-    document.getElementById("picker-ok").addEventListener("click", () => {
-      const id = document.getElementById("picker-select").value;
-      const t = therapists.find((x) => x.id === id);
+    okBtn.addEventListener("click", async () => {
+      const id = listSelectValue(select);
+      /* Re-read the list: a name may have been added from this dialog. */
+      const t = (await Storage.therapists.list()).find((x) => x.id === id);
+      if (!t) return;
       cleanup();
-      resolve(t ? { userId: t.id, name: t.name } : null);
+      resolve({ userId: t.id, name: t.name });
     });
   });
 }
@@ -206,6 +217,7 @@ const SetupSheetForm = {
       if (!el) continue;
       if (f.type === "check") data[f.id] = !!el.checked;
       else if (f.type === "dropdown") data[f.id] = el.value || NA;
+      else if (el.dataset.list) data[f.id] = listSelectValue(el);
       else data[f.id] = el.value;
     }
     if (this._checklist) data.checklist = JSON.parse(JSON.stringify(this._checklist));
@@ -214,7 +226,11 @@ const SetupSheetForm = {
 
   /* The set-up sheet values the checklist's patient and scan details use. */
   _sheetValues() {
-    const val = (id) => document.getElementById(`ss-${id}`)?.value || "";
+    const val = (id) => {
+      const el = document.getElementById(`ss-${id}`);
+      if (!el) return "";
+      return el.dataset.list ? listSelectValue(el) : el.value;
+    };
     return {
       patientName: val("patientName"),
       patientId: val("patientId"),
@@ -589,6 +605,17 @@ const SetupSheetForm = {
 
       case "text":
       default:
+        if (LIST_FIELDS[f.id]) {
+          /* Options are filled in by fillListSelects() once rendered. */
+          const cur = String(v || "");
+          return `
+            <label class="setup-sheet__field">
+              ${labelHtml}
+              <select id="ss-${f.id}" class="setup-sheet__input" data-list="${LIST_FIELDS[f.id]}" data-value="${escapeHtml(cur)}"${disabled}>
+                <option value="${escapeHtml(cur)}" selected>${escapeHtml(cur || "Select…")}</option>
+              </select>
+            </label>`;
+        }
         return `
           <label class="setup-sheet__field">
             ${labelHtml}
@@ -661,6 +688,7 @@ const SetupSheetForm = {
       exportBtn.addEventListener("click", () => exportSheet(this._config, this._record));
     }
 
+    fillListSelects(form);
     this._mountChecklist();
     this._mountPhotos();
     this._installGuard();

@@ -1,6 +1,6 @@
 /**
  * Settings screen. Pick the default therapist, link out to the therapist,
- * photo label and radiation oncologist editors, free up photo storage, and offer a destructive
+ * photo label, radiation oncologist and diagnosis editors, free up photo storage, and offer a destructive
  * "wipe all app data" action for fresh starts.
  */
 
@@ -35,7 +35,7 @@ const SettingsPanel = {
       return d.toISOString();
     })();
 
-    const [therapists, defaultId, records, archivedRecords, archivableCount, photoStats, photoCounts, photoLabels, oncologists] = await Promise.all([
+    const [therapists, defaultId, records, archivedRecords, archivableCount, photoStats, photoCounts, photoLabels, oncologists, diagnoses] = await Promise.all([
       Storage.therapists.list(),
       Storage.settings.get("defaultTherapistId"),
       Storage.records.list(undefined, { includeArchived: true }),
@@ -45,6 +45,7 @@ const SettingsPanel = {
       Storage.photos.countByOwner(),
       Storage.photoLabels.list(),
       Storage.oncologists.list(),
+      Storage.diagnoses.list(),
     ]);
     const archivedCount = archivedRecords.length;
     const archivedPhotoCount = archivedRecords.reduce(
@@ -68,7 +69,7 @@ const SettingsPanel = {
 
       <section class="panel">
         <h2 class="panel__title">Therapist list</h2>
-        <p class="panel__desc">${therapists.length} therapist${therapists.length === 1 ? "" : "s"} configured. Used in the completion picker.</p>
+        <p class="panel__desc">${therapists.length} therapist${therapists.length === 1 ? "" : "s"} configured. Used for Radiotherapist, &ldquo;Checklist reviewed by&rdquo; and the completion picker.</p>
         <a href="#/therapists" class="btn btn--ghost">Edit list</a>
       </section>
 
@@ -88,6 +89,12 @@ const SettingsPanel = {
         <h2 class="panel__title">Radiation oncologists</h2>
         <p class="panel__desc">${oncologists.length} name${oncologists.length === 1 ? "" : "s"} offered for &ldquo;Treating radiation oncologist&rdquo; on the scan checklist.</p>
         <a href="#/oncologists" class="btn btn--ghost">Edit list</a>
+      </section>
+
+      <section class="panel">
+        <h2 class="panel__title">Diagnoses</h2>
+        <p class="panel__desc">${diagnoses.length} diagnos${diagnoses.length === 1 ? "is" : "es"} offered in the set-up sheet&rsquo;s Diagnosis dropdown.</p>
+        <a href="#/diagnoses" class="btn btn--ghost">Edit list</a>
       </section>
 
       <section class="panel">
@@ -113,7 +120,7 @@ const SettingsPanel = {
         </div>
       </section>
 
-      <p class="page-sub" style="margin-top:24px">Setup Sheets PWA &middot; v5.1</p>
+      <p class="page-sub" style="margin-top:24px">Setup Sheets PWA &middot; v5.2</p>
     `;
 
     this._bind();

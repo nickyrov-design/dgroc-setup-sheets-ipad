@@ -11,6 +11,7 @@ import SettingsPanel from "./settingsPanel.js";
 import TherapistsPanel from "./therapistsPanel.js";
 import PhotoLabelsPanel from "./photoLabelsPanel.js";
 import OncologistsPanel from "./oncologistsPanel.js";
+import DiagnosesPanel from "./diagnosesPanel.js";
 
 /* Register service worker (best-effort — non-fatal if it fails). */
 if ("serviceWorker" in navigator) {
@@ -47,5 +48,6 @@ Router.register("/settings", (container) => SettingsPanel.mount(container));
 Router.register("/therapists", (container) => TherapistsPanel.mount(container));
 Router.register("/photo-labels", (container) => PhotoLabelsPanel.mount(container));
 Router.register("/oncologists", (container) => OncologistsPanel.mount(container));
+Router.register("/diagnoses", (container) => DiagnosesPanel.mount(container));
 
 Router.start();

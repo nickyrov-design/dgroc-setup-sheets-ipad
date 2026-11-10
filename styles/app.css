@@ -1262,7 +1262,13 @@ html.has-photo-viewer body { overflow: hidden; }
 
 .checklist-item__text:disabled { cursor: default; }
 .checklist-item.is-done .checklist-item__text { color: var(--text-dim); }
-.checklist-item.is-na .checklist-item__text { color: var(--text-dim); text-decoration: line-through; text-decoration-color: var(--border-strong); }
+/* N/A: struck through with a thick red line. */
+.checklist-item.is-na .checklist-item__text {
+  color: var(--text-dim);
+  text-decoration: line-through;
+  text-decoration-color: var(--danger);
+  text-decoration-thickness: 3px;
+}
 
 .checklist-item__answers {
   display: flex;
@@ -1320,6 +1326,12 @@ html.has-photo-viewer body { overflow: hidden; }
 }
 
 .dialog-backdrop--top { z-index: 150; }
+
+/* Dialogs with a text box sit high so the iPad keyboard can't cover them. */
+.dialog-backdrop--keyboard {
+  align-items: flex-start;
+  padding-top: calc(48px + env(safe-area-inset-top));
+}
 
 .dialog__list {
   margin: 0 0 18px;

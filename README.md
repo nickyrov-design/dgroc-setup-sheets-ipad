@@ -43,8 +43,13 @@ After first load the app is cached for offline use — Wi-Fi only needed for cod
 3. Optionally pick a different default therapist on the Settings screen.
 
 4. Check **Settings → Radiation oncologists**. It starts with Dr Kotzen, Dr Hugo, Dr Tunmer, Dr Chetty and Dr Mutsoane; add, rename, reorder or remove names as needed.
+5. **Settings → Diagnoses** starts empty. Add diagnoses there, or as you go from a sheet's Diagnosis dropdown.
 
 You can now tap a sheet card on the landing screen and start filling.
+
+### Name dropdowns
+
+Radiotherapist, Diagnosis, Treating radiation oncologist, Checklist reviewed by and the therapist picker on **Complete Form** are dropdowns of the lists in Settings. Each has **+ Add new…** at the bottom: pick it, type the name and tap **Add** to add it to the list and select it, without leaving the sheet. Rename, reorder or remove names in Settings. Radiotherapist, Checklist reviewed by and the completion picker all use the Therapist list.
 
 ## Scan checklists
 
@@ -52,7 +57,7 @@ Every new sheet has a scan checklist, on by default.
 
 - After you tap a sheet card, **Which site are you scanning?** asks for the site: Breast (Left or Right), Head and neck, Pelvis, SBRT – Pancreas, SBRT – Liver, SBRT – Lung, SBRT – Para-aortic lymph nodes, Cranial SRS, or Other / general (patient details and final checks only). Tapping a site only selects it (highlighted, with a tick); tap **Confirm** to use it, so a mis-tap is easy to correct. **Choose later** leaves it for now; **No checklist for this sheet** turns it off after an "Are you sure?".
 - The sheet then has two tabs: **Set-up sheet** and **Scan checklist** (with a count such as 12/35). The checklist tab has the on/off switch, the site (**Change site**), the patient and scan details, the site's items with its **Escalate** warning above them, and the final checks.
-- Tap **✓** or **N/A** for each item (tap again to clear). Tapping an item's text ticks it.
+- Tap **✓** or **N/A** for each item (tap again to clear). Tapping an item's text ticks it. N/A items are struck through in red.
 - Patient name / ID, date of planning scan and person performing the scan come from the set-up sheet (Patient name, Patient ID, Scan date, Radiotherapist), so they're only typed once. Pick the treating radiation oncologist and who reviewed the checklist from the lists, and add any outstanding queries or comments.
 - **Complete Form** / **Save** warns if anything on the checklist is still open, with **Go to checklist** or **Complete anyway**.
 - Changing the site clears the old site's ticks (after asking); patient details and final checks are kept.
@@ -140,8 +145,10 @@ scripts/
 ├── setupSheetHistory.js        History list
 ├── therapistsPanel.js          Therapist list editor
 ├── listEditorPanel.js          Shared editor for ordered name lists
+├── nameLists.js                Name-list dropdowns with "+ Add new…"
 ├── photoLabelsPanel.js         Photo label list editor
 ├── oncologistsPanel.js         Radiation oncologist list editor
+├── diagnosesPanel.js           Diagnosis list editor
 ├── settingsPanel.js            Settings screen
 └── setupSheetConfigs/          The 3 sheet definitions, copied verbatim from desktop
     ├── index.js

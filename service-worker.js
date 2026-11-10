@@ -1,7 +1,7 @@
 /* Setup Sheets PWA — offline cache.
    Bump CACHE_VERSION on any code/template change so installed clients pick it up. */
 
-const CACHE_VERSION = "v9";
+const CACHE_VERSION = "v10";
 const CACHE_NAME = `setup-sheets-${CACHE_VERSION}`;
 
 const PRECACHE = [
@@ -25,6 +25,8 @@ const PRECACHE = [
   "./scripts/listEditorPanel.js",
   "./scripts/photoLabelsPanel.js",
   "./scripts/oncologistsPanel.js",
+  "./scripts/diagnosesPanel.js",
+  "./scripts/nameLists.js",
   "./scripts/settingsPanel.js",
   "./scripts/photos.js",
   "./scripts/photoGallery.js",

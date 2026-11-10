@@ -8,9 +8,9 @@
  */
 
 import Router from "./router.js";
-import Storage from "./storage.js";
 import { CHECKLIST_SITES, SITE_SIDES, FINAL_CHECKS, DETAIL_LABELS, IMPORTANT_NOTE } from "./scanChecklists.js";
 import { checklistModel, siteLabel } from "./checklistState.js";
+import { fillListSelects, listSelectValue } from "./nameLists.js";
 
 const TICK_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>`;
 const WARN_ICON = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`;
@@ -213,8 +213,6 @@ export function confirmIncompleteChecklist(issues, { isEdit = false } = {}) {
  */
 export function mountChecklist(host, { state, readOnly = false, getSheet, onChange }) {
   let alive = true;
-  let therapists = [];
-  let oncologists = [];
   const dis = readOnly ? " disabled" : "";
 
   const changed = () => { if (alive) onChange?.(); };
@@ -239,15 +237,14 @@ export function mountChecklist(host, { state, readOnly = false, getSheet, onChan
       </div>`;
   }
 
-  function selectHtml(key, label, names, emptyHint) {
+  /* A name-list dropdown (with "+ Add new…"); filled in by fillListSelects(). */
+  function selectHtml(key, label, list) {
     const cur = state.details[key];
-    const all = cur && !names.includes(cur) ? [...names, cur] : names;
     return `
       <label class="setup-sheet__field">
         <span class="setup-sheet__label">${escapeHtml(label)}</span>
-        <select class="setup-sheet__input" data-detail="${key}"${dis}>
-          <option value="">${escapeHtml(all.length ? "Select…" : emptyHint)}</option>
-          ${all.map((n) => `<option value="${escapeHtml(n)}"${n === cur ? " selected" : ""}>${escapeHtml(n)}</option>`).join("")}
+        <select class="setup-sheet__input" data-detail="${key}" data-list="${list}" data-value="${escapeHtml(cur)}"${dis}>
+          <option value="${escapeHtml(cur)}" selected>${escapeHtml(cur || "Select…")}</option>
         </select>
       </label>`;
   }
@@ -308,8 +305,8 @@ export function mountChecklist(host, { state, readOnly = false, getSheet, onChan
           ${mirrorHtml("site", DETAIL_LABELS.site)}
           ${mirrorHtml("scanDate", DETAIL_LABELS.scanDate)}
           ${mirrorHtml("performedBy", DETAIL_LABELS.performedBy)}
-          ${selectHtml("oncologist", DETAIL_LABELS.oncologist, oncologists.map((o) => o.name), "None yet — add in Settings")}
-          ${selectHtml("reviewedBy", DETAIL_LABELS.reviewedBy, therapists.map((t) => t.name), "None yet — add in Settings")}
+          ${selectHtml("oncologist", DETAIL_LABELS.oncologist, "oncologists")}
+          ${selectHtml("reviewedBy", DETAIL_LABELS.reviewedBy, "therapists")}
           <label class="setup-sheet__field setup-sheet__field--full">
             <span class="setup-sheet__label">${escapeHtml(DETAIL_LABELS.comments)}</span>
             <textarea class="setup-sheet__textarea" rows="3" data-detail="comments"${dis}>${escapeHtml(state.details.comments)}</textarea>
@@ -384,6 +381,7 @@ export function mountChecklist(host, { state, readOnly = false, getSheet, onChan
           <p class="checklist-note"><strong>Important:</strong> ${escapeHtml(IMPORTANT_NOTE)}</p>
         ` : ""}
       </div>`;
+    fillListSelects(host);
   }
 
   function setAnswer(row, answer) {
@@ -475,7 +473,7 @@ export function mountChecklist(host, { state, readOnly = false, getSheet, onChan
       return;
     }
     if (t.matches("select[data-detail]")) {
-      state.details[t.dataset.detail] = t.value;
+      state.details[t.dataset.detail] = listSelectValue(t);
       changed();
     }
   }
@@ -494,23 +492,6 @@ export function mountChecklist(host, { state, readOnly = false, getSheet, onChan
   host.addEventListener("input", onInput);
 
   render();
-  Promise.all([Storage.therapists.list(), Storage.oncologists.list()])
-    .then(([t, o]) => {
-      therapists = t;
-      oncologists = o;
-      /* Re-render with the name lists unless the user is typing a comment. */
-      if (alive && !host.contains(document.activeElement)) render();
-      else if (alive) {
-        host.querySelectorAll("select[data-detail]").forEach((sel) => {
-          const key = sel.dataset.detail;
-          const names = (key === "oncologist" ? o : t).map((x) => x.name);
-          const tmp = document.createElement("div");
-          tmp.innerHTML = selectHtml(key, "", names, "None yet — add in Settings");
-          sel.replaceWith(tmp.querySelector("select"));
-        });
-      }
-    })
-    .catch((err) => console.error("Could not load the oncologist / therapist lists:", err));
 
   return {
     refreshMirrors() {

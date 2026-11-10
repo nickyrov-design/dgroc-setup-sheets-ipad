@@ -1,6 +1,6 @@
 /**
- * IndexedDB wrapper. Eight stores: records, pdfs, therapists, settings, photos,
- * photoBlobs, photoLabels, oncologists.
+ * IndexedDB wrapper. Nine stores: records, pdfs, therapists, settings, photos,
+ * photoBlobs, photoLabels, oncologists, diagnoses.
  *
  * Rows that get rewritten hold no Blobs: iOS Safari often fails to store a
  * Blob that was read back out of IndexedDB ("Error preparing Blob/File data to
@@ -25,10 +25,12 @@
  * photoLabels: keyed by uuid. Editable quick-pick labels for photos, in `order`.
  * oncologists: keyed by uuid. Editable list of treating radiation oncologists
  *              offered on the scan checklist, in `order`.
+ * diagnoses:   keyed by uuid. Editable list offered for a set-up sheet's
+ *              Diagnosis, in `order`. Starts empty.
  */
 
 const DB_NAME = "dgroc-setup-sheets";
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 /* Seeded when the photoLabels store is created; editable in Settings. */
 const DEFAULT_PHOTO_LABELS = [
@@ -104,6 +106,10 @@ function openDb() {
           const order = rows.reduce((max, l) => Math.max(max, l.order ?? 0), -1) + 1;
           labels.add({ id: uuid(), name: "Bolus", order });
         };
+      }
+      /* v5 -> v6: diagnosis list for the set-up sheet's Diagnosis dropdown. */
+      if (!db.objectStoreNames.contains("diagnoses")) {
+        db.createObjectStore("diagnoses", { keyPath: "id" });
       }
     };
     req.onsuccess = () => {
@@ -515,7 +521,7 @@ async function photoStats() {
   return { count: rows.length, bytes };
 }
 
-/* ---- ordered name lists (photo labels, radiation oncologists) ---- */
+/* ---- ordered name lists (photo labels, radiation oncologists, diagnoses) ---- */
 
 /* list / add / rename / remove / move for a store of { id, name, order }.
    `noun` names an entry in error messages ("Label required."). */
@@ -574,6 +580,7 @@ function orderedList(storeName, noun) {
 
 const photoLabels = orderedList("photoLabels", "Label");
 const oncologists = orderedList("oncologists", "Name");
+const diagnoses = orderedList("diagnoses", "Diagnosis");
 
 /* ---- therapists ---- */
 
@@ -652,6 +659,7 @@ export default {
   },
   photoLabels,
   oncologists,
+  diagnoses,
   therapists: { list: listTherapists, add: addTherapist, rename: renameTherapist, remove: removeTherapist },
   settings: { get: getSetting, set: setSetting },
   generateId,
