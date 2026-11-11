@@ -988,6 +988,53 @@ html.has-photo-viewer body { overflow: hidden; }
   border-style: dashed;
 }
 
+/* ---- Multi-name field (several radiotherapists) ---- */
+
+.multi-field__rows {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 8px 16px;
+}
+
+.multi-field__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.multi-field__row .setup-sheet__input { flex: 1; min-width: 0; }
+
+.multi-field__remove,
+.multi-field__spacer {
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+}
+
+.multi-field__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--danger);
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.multi-field__foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 4px;
+}
+
+.multi-field__foot[hidden] { display: none; }
+.multi-field__hint { color: var(--text-dim); font-size: 0.82rem; }
+
 /* ---- Set-up sheet tabs (Set-up sheet | Scan checklist) ---- */
 
 /* Sticks just below the header; --app-header-h is set from its measured height. */

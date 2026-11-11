@@ -318,7 +318,9 @@ async function listRecords(sheetId, opts = {}) {
       patientName: r.patientName || "",
       patientId: r.patientId || "",
       scanDate: r.scanDate || "",
-      radiotherapist: r.radiotherapist || "",
+      /* Every radiotherapist on the sheet, first one first. */
+      radiotherapist: [r.radiotherapist, ...(Array.isArray(r.extraRadiotherapists) ? r.extraRadiotherapists : [])]
+        .filter(Boolean).join(", "),
       linac: r.linac || "",
       completedBy: r.completedBy || "",
       completedAt: r.completedAt || "",

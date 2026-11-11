@@ -120,7 +120,7 @@ const SettingsPanel = {
         </div>
       </section>
 
-      <p class="page-sub" style="margin-top:24px">Setup Sheets PWA &middot; v5.2</p>
+      <p class="page-sub" style="margin-top:24px">Setup Sheets PWA &middot; v5.3</p>
     `;
 
     this._bind();

@@ -35,7 +35,7 @@ import {
   checklistIssues, toRecordChecklist, checklistFingerprint,
 } from "./checklistState.js";
 import { appendChecklistPages } from "./checklistPdf.js";
-import { fillListSelects, listSelectValue } from "./nameLists.js";
+import { fillListSelects, listSelectValue, ADD_NEW } from "./nameLists.js";
 
 const NA = "N/A";
 
@@ -46,6 +46,33 @@ const LIST_FIELDS = {
   radiotherapist: "therapists",
   diagnosis: "diagnoses",
 };
+
+/* List fields that can hold several names. The first dropdown is always
+   shown and is the field itself (e.g. `radiotherapist`, which the scan
+   checklist's "Person performing scan" uses); "+ Add" adds more, up to
+   `max` in all, saved in order as `extraKey`. On the PDF every name prints
+   on the field's line, shrinking to fit `pdfMaxWidth` points. */
+const MULTI_FIELDS = {
+  radiotherapist: {
+    extraKey: "extraRadiotherapists",
+    max: 5,
+    addLabel: "+ Add therapist",
+    hint: "Up to 5 therapists or students.",
+    pdfMaxWidth: 174,
+  },
+};
+
+/* Every name in a multi-name field, first one first, without blanks or repeats. */
+function multiNames(id, data) {
+  const m = MULTI_FIELDS[id];
+  const extras = Array.isArray(data?.[m.extraKey]) ? data[m.extraKey] : [];
+  const out = [];
+  for (const v of [data?.[id], ...extras]) {
+    const s = String(v || "").trim();
+    if (s && !out.includes(s)) out.push(s);
+  }
+  return out;
+}
 
 function escapeHtml(s) {
   return String(s ?? "")
@@ -220,6 +247,15 @@ const SetupSheetForm = {
       else if (el.dataset.list) data[f.id] = listSelectValue(el);
       else data[f.id] = el.value;
     }
+    /* Extra names of multi-name fields; if the first dropdown is blank, the
+       next name moves up so the field itself is always the first name. */
+    for (const [id, m] of Object.entries(MULTI_FIELDS)) {
+      if (!(id in data)) continue;
+      const extras = [...document.querySelectorAll(`select[data-multi-extra="${id}"]`)].map(listSelectValue);
+      const names = multiNames(id, { [id]: data[id], [m.extraKey]: extras });
+      data[id] = names[0] || "";
+      data[m.extraKey] = names.slice(1, m.max);
+    }
     if (this._checklist) data.checklist = JSON.parse(JSON.stringify(this._checklist));
     return data;
   },
@@ -231,11 +267,14 @@ const SetupSheetForm = {
       if (!el) return "";
       return el.dataset.list ? listSelectValue(el) : el.value;
     };
+    /* The first radiotherapist, as it will be saved (see _readDOM). */
+    const extras = [...document.querySelectorAll('select[data-multi-extra="radiotherapist"]')].map(listSelectValue);
+    const firstRt = multiNames("radiotherapist", { radiotherapist: val("radiotherapist"), extraRadiotherapists: extras })[0] || "";
     return {
       patientName: val("patientName"),
       patientId: val("patientId"),
       scanDate: val("scanDate"),
-      radiotherapist: val("radiotherapist"),
+      radiotherapist: firstRt,
     };
   },
 
@@ -274,6 +313,11 @@ const SetupSheetForm = {
         } else if (String(now ?? "") !== String(was ?? "")) {
           return true;
         }
+      }
+      for (const m of Object.values(MULTI_FIELDS)) {
+        const now = cur[m.extraKey] || [];
+        const was = Array.isArray(this._record[m.extraKey]) ? this._record[m.extraKey] : [];
+        if (JSON.stringify(now) !== JSON.stringify(was)) return true;
       }
       return checklistFingerprint(this._checklist)
         !== checklistFingerprint(readChecklistState(this._record.checklist));
@@ -605,6 +649,7 @@ const SetupSheetForm = {
 
       case "text":
       default:
+        if (MULTI_FIELDS[f.id]) return this._renderMultiField(f, d, ro);
         if (LIST_FIELDS[f.id]) {
           /* Options are filled in by fillListSelects() once rendered. */
           const cur = String(v || "");
@@ -624,6 +669,82 @@ const SetupSheetForm = {
     }
   },
 
+  /* ---- Multi-name fields (several radiotherapists) ---- */
+
+  /* A name-list dropdown; options are filled in by fillListSelects(). */
+  _multiSelectHtml(id, value, attrs, ro) {
+    return `
+      <select class="setup-sheet__input" data-list="${LIST_FIELDS[id]}" data-value="${escapeHtml(value)}" ${attrs}${ro ? " disabled" : ""}>
+        <option value="${escapeHtml(value)}" selected>${escapeHtml(value || "Select…")}</option>
+      </select>`;
+  },
+
+  /* An added dropdown, with its remove button. */
+  _multiExtraRowHtml(id, value, ro, n) {
+    const label = `${escapeHtml(this._config.fields.find((x) => x.id === id)?.label || "Name")} ${n}`;
+    return `
+      <div class="multi-field__row">
+        ${this._multiSelectHtml(id, value, `data-multi-extra="${id}" aria-label="${label}"`, ro)}
+        ${ro ? "" : `<button type="button" class="multi-field__remove" data-multi-remove aria-label="Remove ${label}">&times;</button>`}
+      </div>`;
+  },
+
+  _renderMultiField(f, d, ro) {
+    const m = MULTI_FIELDS[f.id];
+    const names = multiNames(f.id, d);
+    const first = names[0] || "";
+    const extras = names.slice(1, m.max);
+    return `
+      <div class="setup-sheet__field setup-sheet__field--full multi-field" data-multi="${f.id}">
+        <label class="setup-sheet__label" for="ss-${f.id}">${escapeHtml(f.label)}</label>
+        <div class="multi-field__rows">
+          <div class="multi-field__row">
+            ${this._multiSelectHtml(f.id, first, `id="ss-${f.id}" data-multi-first="${f.id}"`, ro)}
+            ${ro ? "" : `<span class="multi-field__spacer" aria-hidden="true"></span>`}
+          </div>
+          ${extras.map((v, i) => this._multiExtraRowHtml(f.id, v, ro, i + 2)).join("")}
+        </div>
+        ${ro ? "" : `
+          <div class="multi-field__foot">
+            <button type="button" class="btn btn--ghost btn--sm" data-multi-add="${f.id}">${escapeHtml(m.addLabel)}</button>
+            <span class="multi-field__hint">${escapeHtml(m.hint)}</span>
+          </div>`}
+      </div>`;
+  },
+
+  _addMultiRow(id) {
+    const m = MULTI_FIELDS[id];
+    const rows = document.querySelector(`[data-multi="${id}"] .multi-field__rows`);
+    if (!rows || rows.children.length >= m.max) return;
+    rows.insertAdjacentHTML("beforeend", this._multiExtraRowHtml(id, "", false, rows.children.length + 1));
+    fillListSelects(rows.lastElementChild).then(() => this._syncMultiFields());
+    this._syncMultiFields();
+  },
+
+  /* Greys out names already picked in another dropdown of the same field,
+     renumbers the added dropdowns, and hides "+ Add" once the field is full. */
+  _syncMultiFields() {
+    for (const [id, m] of Object.entries(MULTI_FIELDS)) {
+      const field = document.querySelector(`[data-multi="${id}"]`);
+      if (!field) continue;
+      const selects = [...field.querySelectorAll("select[data-list]")];
+      const chosen = selects.map(listSelectValue);
+      selects.forEach((sel, i) => {
+        for (const opt of sel.options) {
+          if (!opt.value || opt.value === ADD_NEW) continue;
+          opt.disabled = chosen.some((c, j) => j !== i && c === opt.value);
+        }
+      });
+      const label = this._config.fields.find((x) => x.id === id)?.label || "Name";
+      field.querySelectorAll("select[data-multi-extra]").forEach((sel, i) => {
+        sel.setAttribute("aria-label", `${label} ${i + 2}`);
+        sel.parentElement.querySelector("[data-multi-remove]")?.setAttribute("aria-label", `Remove ${label} ${i + 2}`);
+      });
+      const foot = field.querySelector(".multi-field__foot");
+      if (foot) foot.hidden = selects.length >= m.max;
+    }
+  },
+
   /* ---- Event wiring ---- */
 
   _bind() {
@@ -635,6 +756,37 @@ const SetupSheetForm = {
 
     form.querySelectorAll("[data-tab]").forEach((btn) => {
       btn.addEventListener("click", () => this._showTab(btn.dataset.tab));
+    });
+
+    /* Multi-name fields: add / remove dropdowns, and no name twice. */
+    form.addEventListener("click", (e) => {
+      const add = e.target.closest("[data-multi-add]");
+      if (add) {
+        this._addMultiRow(add.dataset.multiAdd);
+        return;
+      }
+      const remove = e.target.closest("[data-multi-remove]");
+      if (remove) {
+        remove.closest(".multi-field__row").remove();
+        this._syncMultiFields();
+        this._saveDraft();
+        this._checklistUi?.refreshMirrors();
+      }
+    });
+    form.addEventListener("change", (e) => {
+      const sel = e.target;
+      if (!sel.matches?.("select[data-multi-first], select[data-multi-extra]")) return;
+      const field = sel.closest("[data-multi]");
+      const value = listSelectValue(sel);
+      const taken = value && [...field.querySelectorAll("select[data-list]")]
+        .some((other) => other !== sel && listSelectValue(other) === value);
+      if (taken) {
+        /* e.g. a name added with "+ Add new…" that is already picked above. */
+        sel.value = "";
+        sel.dataset.value = "";
+        this._saveDraft();
+      }
+      this._syncMultiFields();
     });
 
     const clearBtn = document.getElementById("ss-clear-btn");
@@ -688,7 +840,7 @@ const SetupSheetForm = {
       exportBtn.addEventListener("click", () => exportSheet(this._config, this._record));
     }
 
-    fillListSelects(form);
+    fillListSelects(form).then(() => this._syncMultiFields());
     this._mountChecklist();
     this._mountPhotos();
     this._installGuard();
@@ -822,8 +974,43 @@ const SetupSheetForm = {
       });
     };
 
+    /* Several names on one line ("A, B, C"), shrinking to fit maxW. If they
+       still don't fit at 7pt, they go on two smaller lines within the same
+       row (split between names where possible), so no name is cut off. */
+    const drawNames = (pos, names, maxW) => {
+      const text = names.join(", ");
+      if (!pos || !text) return;
+      const width = (s, size) => font.widthOfTextAtSize(s, size);
+      for (let size = fontSize; size >= 7; size -= 0.25) {
+        if (width(text, size) <= maxW) {
+          page.drawText(text, { x: pos.x, y: pos.y, size, font, color });
+          return;
+        }
+      }
+      /* Most even split: between names, or between words for a single name. */
+      const parts = names.length > 1 ? names : text.split(/\s+/);
+      const glue = names.length > 1 ? ", " : " ";
+      let best = null;
+      for (let i = 1; i < parts.length; i++) {
+        const a = parts.slice(0, i).join(glue) + (names.length > 1 ? "," : "");
+        const b = parts.slice(i).join(glue);
+        const w = Math.max(width(a, 1), width(b, 1));
+        if (!best || w < best.w) best = { a, b, w };
+      }
+      if (!best) best = { a: text, b: "", w: width(text, 1) };
+      const size = Math.max(4.5, Math.min(6.5, maxW / best.w));
+      const lead = size + 0.6;
+      const lower = pos.y - 1.2; /* second line sits just above the underline */
+      page.drawText(best.a, { x: pos.x, y: lower + lead, size, font, color });
+      if (best.b) page.drawText(best.b, { x: pos.x, y: lower, size, font, color });
+    };
+
     for (const f of this._config.fields) {
       const v = data[f.id];
+      if (MULTI_FIELDS[f.id]) {
+        drawNames(f.coord, multiNames(f.id, data), MULTI_FIELDS[f.id].pdfMaxWidth);
+        continue;
+      }
       switch (f.type) {
         case "check":
           if (v) drawX(f.coord);
@@ -868,6 +1055,10 @@ function syncHeaderHeight() {
   if (header) document.documentElement.style.setProperty("--app-header-h", `${header.offsetHeight}px`);
 }
 window.addEventListener("resize", syncHeaderHeight);
+
+/* "+ Add new…" refreshes every name dropdown's options; re-apply the
+   "already picked" greying on multi-name fields. */
+document.addEventListener("namelists:refreshed", () => SetupSheetForm._syncMultiFields());
 
 function flushDraftOnHide() {
   if (SetupSheetForm._mode === "new") SetupSheetForm._saveDraft();

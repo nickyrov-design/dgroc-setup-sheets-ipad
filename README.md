@@ -49,6 +49,8 @@ You can now tap a sheet card on the landing screen and start filling.
 
 ### Name dropdowns
 
+A sheet can have up to 5 radiotherapists (therapists or students). One Radiotherapist dropdown is always there; **+ Add therapist** adds another, and **×** removes it. A name can only be picked once. All of them print on the Radiotherapist line of the PDF, smaller as needed (on two smaller lines in that row if there are many), and History lists them all. The scan checklist's "Person performing scan" is the first radiotherapist.
+
 Radiotherapist, Diagnosis, Treating radiation oncologist, Checklist reviewed by and the therapist picker on **Complete Form** are dropdowns of the lists in Settings. Each has **+ Add new…** at the bottom: pick it, type the name and tap **Add** to add it to the list and select it, without leaving the sheet. Rename, reorder or remove names in Settings. Radiotherapist, Checklist reviewed by and the completion picker all use the Therapist list.
 
 ## Scan checklists

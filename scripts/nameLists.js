@@ -155,6 +155,7 @@ async function onAddNew(sel) {
   /* Refresh every dropdown of this list on the page, then select the new name. */
   sel.dataset.value = picked ? (sel.dataset.listValue === "id" ? picked.id : picked.name) : prev;
   await fillListSelects(document);
+  document.dispatchEvent(new CustomEvent("namelists:refreshed"));
   if (!sel.isConnected) return;
   if (picked) sel.dispatchEvent(new Event("change", { bubbles: true }));
 }
